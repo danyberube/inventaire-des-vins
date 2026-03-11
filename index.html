@@ -14,6 +14,7 @@
         <div class="sync-controls">
           <span class="sync-indicator" id="syncIndicator">Chargement...</span>
           <button class="sync-btn" id="syncBtn" title="Rafraîchir depuis Alfred">↻</button>
+          <button class="sync-btn" id="logoutBtn" title="Déconnexion">⏻</button>
           <div class="download-wrapper">
             <button class="sync-btn" id="downloadBtn" title="Télécharger l'inventaire">↓</button>
             <div class="download-menu" id="downloadMenu">
@@ -57,6 +58,17 @@
 
     <section class="wine-grid" id="wineGrid"></section>
   </main>
+
+  <div class="login-overlay" id="loginScreen" style="display:none">
+    <div class="login-box">
+      <h2>Ma Cave à Vin</h2>
+      <form id="loginForm">
+        <input type="password" id="loginPassword" placeholder="Mot de passe" autocomplete="current-password" required>
+        <button type="submit">Entrer</button>
+        <p class="login-error" id="loginError"></p>
+      </form>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

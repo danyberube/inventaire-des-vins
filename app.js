@@ -272,17 +272,49 @@ function setViewMode(mode) {
 
 const API_URL = 'https://wine-api-proxy.dany-b53.workers.dev';
 
+function showLogin() {
+  document.getElementById('loginScreen').style.display = '';
+  document.querySelector('header').style.display = 'none';
+  document.querySelector('main').style.display = 'none';
+}
+
+function showApp() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.querySelector('header').style.display = '';
+  document.querySelector('main').style.display = '';
+}
+
+async function login(password) {
+  const res = await fetch(API_URL + '/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ password }),
+  });
+  return res.ok;
+}
+
+async function logout() {
+  await fetch(API_URL + '/logout', { credentials: 'include' });
+  showLogin();
+}
+
 async function loadWines() {
   const indicator = document.getElementById('syncIndicator');
 
   try {
-    const res = await fetch(API_URL);
+    const res = await fetch(API_URL, { credentials: 'include' });
+    if (res.status === 401) {
+      showLogin();
+      return false;
+    }
     if (!res.ok) throw new Error('API error ' + res.status);
     wines = await res.json();
     if (indicator) {
       indicator.textContent = 'Données en direct';
       indicator.className = 'sync-indicator sync-live';
     }
+    return true;
   } catch (e) {
     try {
       const res = await fetch('wines.json');
@@ -291,18 +323,23 @@ async function loadWines() {
         indicator.textContent = 'Données hors-ligne';
         indicator.className = 'sync-indicator sync-offline';
       }
+      return true;
     } catch (e2) {
       wines = [];
       if (indicator) {
         indicator.textContent = 'Erreur de chargement';
         indicator.className = 'sync-indicator sync-offline';
       }
+      return true;
     }
   }
 }
 
 async function init() {
-  await loadWines();
+  const loaded = await loadWines();
+  if (!loaded) return; // login screen shown
+
+  showApp();
   renderStats();
   populateFilters();
   applyFilters();
@@ -347,6 +384,22 @@ async function init() {
       syncBtn.textContent = '↻';
     });
   }
+
+  document.getElementById('logoutBtn').addEventListener('click', logout);
 }
+
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pw = document.getElementById('loginPassword').value;
+  const err = document.getElementById('loginError');
+  err.textContent = '';
+  const ok = await login(pw);
+  if (ok) {
+    document.getElementById('loginPassword').value = '';
+    init();
+  } else {
+    err.textContent = 'Mot de passe incorrect';
+  }
+});
 
 init();
