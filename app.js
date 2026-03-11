@@ -394,10 +394,22 @@ async function init() {
 
   document.getElementById('logoutBtn').addEventListener('click', logout);
 
-  // Chat
-  document.getElementById('chatToggle').style.display = '';
+  // FAB group & Chat
+  document.getElementById('fabGroup').style.display = '';
   document.getElementById('chatToggle').addEventListener('click', toggleChat);
   document.getElementById('chatClose').addEventListener('click', toggleChat);
+
+  // Profile panel
+  document.getElementById('profileToggle').addEventListener('click', toggleProfile);
+  document.getElementById('profileClose').addEventListener('click', toggleProfile);
+  document.getElementById('prefAddForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('prefInput');
+    addPreference(input.value);
+    input.value = '';
+  });
+  document.getElementById('startGuideBtn').addEventListener('click', startTasteGuide);
+  loadPreferences();
   document.getElementById('chatForm').addEventListener('submit', (e) => {
     e.preventDefault();
     sendChatMessage(document.getElementById('chatInput').value);
@@ -426,11 +438,100 @@ async function init() {
   });
 }
 
+// Preferences / Profile
+let preferences = [];
+
+function toggleProfile() {
+  const panel = document.getElementById('profilePanel');
+  const chatPanel = document.getElementById('chatPanel');
+  if (chatPanel.classList.contains('open') && !panel.classList.contains('open')) {
+    chatPanel.classList.remove('open');
+  }
+  panel.classList.toggle('open');
+}
+
+async function loadPreferences() {
+  try {
+    const res = await fetch(API_URL + '/preferences', { headers: authHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    preferences = data.preferences || [];
+    renderPreferences();
+  } catch {}
+}
+
+async function savePreferences() {
+  try {
+    await fetch(API_URL + '/preferences', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preferences }),
+    });
+  } catch {}
+}
+
+function renderPreferences() {
+  const list = document.getElementById('prefList');
+  const empty = document.getElementById('prefEmpty');
+  const count = document.getElementById('prefCount');
+
+  count.textContent = preferences.length;
+
+  if (preferences.length === 0) {
+    list.innerHTML = '';
+    list.appendChild(empty);
+    empty.style.display = '';
+    return;
+  }
+
+  empty.style.display = 'none';
+  list.innerHTML = preferences.map((pref, i) => `
+    <div class="pref-chip">
+      <span class="pref-chip-text">${escapeHtml(pref)}</span>
+      <button class="pref-chip-delete" data-index="${i}" title="Supprimer">&#10005;</button>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('.pref-chip-delete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.index);
+      preferences.splice(idx, 1);
+      renderPreferences();
+      await savePreferences();
+    });
+  });
+}
+
+async function addPreference(text) {
+  const trimmed = text.trim();
+  if (!trimmed || preferences.includes(trimmed)) return;
+  preferences.push(trimmed);
+  renderPreferences();
+  await savePreferences();
+}
+
+function startTasteGuide() {
+  const profilePanel = document.getElementById('profilePanel');
+  const chatPanel = document.getElementById('chatPanel');
+
+  // Close profile, open chat
+  profilePanel.classList.remove('open');
+  chatPanel.classList.add('open');
+
+  // Send a guided profiling prompt
+  const guidePrompt = '__GUIDE_PROFIL__';
+  sendChatMessage(guidePrompt, true);
+}
+
 // Chat
 let chatHistory = [];
 
 function toggleChat() {
   const panel = document.getElementById('chatPanel');
+  const profilePanel = document.getElementById('profilePanel');
+  if (profilePanel.classList.contains('open') && !panel.classList.contains('open')) {
+    profilePanel.classList.remove('open');
+  }
   panel.classList.toggle('open');
 }
 
@@ -455,17 +556,19 @@ function formatChatText(text) {
     .replace(/\n/g, '<br>');
 }
 
-async function sendChatMessage(text) {
+async function sendChatMessage(text, isGuide = false) {
   if (!text.trim()) return;
 
-  addChatBubble(text, 'user');
+  const displayText = isGuide ? null : text;
+  if (displayText) addChatBubble(displayText, 'user');
   const input = document.getElementById('chatInput');
   const sendBtn = document.querySelector('.chat-send');
   input.value = '';
   input.disabled = true;
   sendBtn.disabled = true;
 
-  const typing = addChatBubble('Reflexion en cours...', 'ai');
+  const typingText = isGuide ? 'Preparation du guide...' : 'Reflexion en cours...';
+  const typing = addChatBubble(typingText, 'ai');
   typing.classList.add('chat-typing');
 
   try {
@@ -483,9 +586,13 @@ async function sendChatMessage(text) {
     }
 
     const data = await res.json();
-    chatHistory.push({ role: 'user', content: text });
+    if (!isGuide) chatHistory.push({ role: 'user', content: text });
+    else chatHistory.push({ role: 'user', content: text });
     chatHistory.push({ role: 'assistant', content: data.reply });
     addChatBubble(data.reply, 'ai');
+
+    // Reload preferences in case they were updated by the chat
+    loadPreferences();
   } catch {
     typing.remove();
     addChatBubble('Erreur de connexion. Verifiez votre reseau.', 'ai');

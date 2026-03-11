@@ -78,14 +78,56 @@
     </section>
   </main>
 
-  <button class="chat-toggle" id="chatToggle" style="display:none" title="Sommelier IA">
-    <span class="chat-toggle-icon">&#127863;</span>
-  </button>
+  <!-- Floating action buttons -->
+  <div class="fab-group" id="fabGroup" style="display:none">
+    <button class="fab fab-profile" id="profileToggle" title="Mon profil de gouts">
+      <span class="fab-icon">&#9733;</span>
+    </button>
+    <button class="fab fab-chat" id="chatToggle" title="Sommelier IA">
+      <span class="fab-icon">&#127863;</span>
+    </button>
+  </div>
 
+  <!-- Taste Profile Panel -->
+  <div class="profile-panel" id="profilePanel">
+    <div class="profile-header">
+      <h3>Mon Profil de Gouts</h3>
+      <button id="profileClose" class="panel-close">&#10005;</button>
+    </div>
+    <div class="profile-body" id="profileBody">
+      <p class="profile-intro">Vos preferences guident les recommandations du sommelier IA.</p>
+
+      <div class="profile-section">
+        <div class="profile-section-header">
+          <h4>Mes preferences</h4>
+          <span class="pref-count" id="prefCount">0</span>
+        </div>
+        <div class="pref-list" id="prefList">
+          <p class="pref-empty" id="prefEmpty">Aucune preference enregistree. Utilisez le guide ou ajoutez-en manuellement.</p>
+        </div>
+      </div>
+
+      <div class="profile-section">
+        <h4>Ajouter une preference</h4>
+        <form class="pref-add-form" id="prefAddForm">
+          <input type="text" id="prefInput" placeholder="Ex: Je prefere les vins corses..." autocomplete="off">
+          <button type="submit" class="pref-add-btn" title="Ajouter">+</button>
+        </form>
+      </div>
+
+      <div class="profile-section profile-guide-section">
+        <h4>Guide interactif</h4>
+        <p class="profile-guide-desc">Laissez le sommelier vous poser des questions pour mieux definir votre profil.</p>
+        <button class="profile-guide-btn" id="startGuideBtn">&#9733; Demarrer le guide</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat Panel -->
   <div class="chat-panel" id="chatPanel">
     <div class="chat-header">
       <h3>Sommelier IA</h3>
-      <button id="chatClose" class="chat-close">&#10005;</button>
+      <button id="chatClose" class="panel-close">&#10005;</button>
     </div>
     <div class="chat-messages" id="chatMessages">
       <div class="chat-bubble chat-bubble-ai">Bonjour! Decrivez-moi votre plat et je vous recommanderai un vin de votre cave.</div>

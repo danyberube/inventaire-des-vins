@@ -174,6 +174,36 @@ Si l'utilisateur demande de voir ses preferences ou son profil, liste-les.
 N'ajoute le bloc PREFS_UPDATE que quand une NOUVELLE preference est clairement exprimee. Ne le mets pas si c'est juste une question ou un commentaire ponctuel.
 `;
 
+const GUIDE_PROMPT = `Tu es un sommelier expert qui aide l'utilisateur a definir son profil de gouts. Tu dois mener une conversation guidee et chaleureuse pour decouvrir ses preferences.
+
+IMPORTANT: Pose UNE SEULE question a la fois. Attends la reponse avant de passer a la suivante.
+
+Voici les themes a explorer (dans l'ordre):
+1. **Couleurs preferees** - Rouge, blanc, rose, ou un melange? Y a-t-il une couleur qu'il n'aime pas du tout?
+2. **Profil de gout** - Prefere-t-il les vins legers et fruites, ou les vins corses et charpentes? Les tanins prononces ou souples?
+3. **Regions / pays favoris** - Y a-t-il des regions vitivinicoles ou des pays qu'il affectionne?
+4. **Cepages** - A-t-il des cepages preferes (cabernet, pinot noir, chardonnay, etc.)?
+5. **Boise / elevage** - Aime-t-il les vins boises, ou prefere-t-il les vins non boises plus frais?
+6. **Occasions** - Boit-il principalement en mangeant? Pour quel type d'occasion?
+7. **Ce qu'il n'aime PAS** - Y a-t-il des styles ou des saveurs qu'il evite?
+
+Commence par te presenter comme son sommelier personnel et pose la PREMIERE question sur les couleurs preferees. Sois chaleureux et decontracte.
+
+A chaque reponse de l'utilisateur:
+- Reformule brevement pour confirmer que tu as bien compris
+- Enregistre la preference avec un bloc <!--PREFS_UPDATE:{"add":["..."]}-->
+- Puis pose la question suivante
+
+Quand tu as couvert tous les themes (ou que l'utilisateur dit qu'il a fini), fais un bref resume de son profil.
+
+Regles:
+- Reponds en francais
+- Sois concis mais chaleureux
+- UNE question par message
+- Enregistre chaque preference detectee avec PREFS_UPDATE
+`;
+
+
 async function handleChat(request, env) {
   let body;
   try {
@@ -189,6 +219,8 @@ async function handleChat(request, env) {
   if (!env.ANTHROPIC_API_KEY) {
     return jsonResponse({ error: 'Anthropic API key not configured' }, 500, request);
   }
+
+  const isGuideMode = body.message === '__GUIDE_PROFIL__';
 
   // Load preferences and wines in parallel
   const [wines, prefsRaw] = await Promise.all([
@@ -211,10 +243,11 @@ async function handleChat(request, env) {
   }).join('\n');
 
   const prefsSection = prefs.length > 0
-    ? '\nPREFERENCES PERSONNELLES:\n' + prefs.map((p) => '- ' + p).join('\n') + '\n'
+    ? '\nPREFERENCES PERSONNELLES ACTUELLES:\n' + prefs.map((p) => '- ' + p).join('\n') + '\n'
     : '\nPREFERENCES PERSONNELLES: (aucune pour le moment)\n';
 
-  const systemPrompt = SOMMELIER_PROMPT + prefsSection + '\nINVENTAIRE DE LA CAVE:\n' + inventory;
+  const basePrompt = isGuideMode ? GUIDE_PROMPT : SOMMELIER_PROMPT;
+  const systemPrompt = basePrompt + prefsSection + '\nINVENTAIRE DE LA CAVE:\n' + inventory;
 
   const messages = [];
   if (body.history && Array.isArray(body.history)) {
@@ -224,7 +257,10 @@ async function handleChat(request, env) {
       }
     }
   }
-  messages.push({ role: 'user', content: body.message });
+  const userMessage = isGuideMode
+    ? 'Je veux definir mon profil de gouts. Guide-moi!'
+    : body.message;
+  messages.push({ role: 'user', content: userMessage });
 
   const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
