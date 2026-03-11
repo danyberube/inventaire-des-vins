@@ -28,10 +28,7 @@ function maturityLabel(status) {
 }
 
 function maturitySortValue(w) {
-  const status = getMaturityStatus(w);
-  if (!status) return 9999;
-  const order = { 'peak': 0, 'ready': 1, 'not-ready': 2, 'past': 3 };
-  return order[status] !== undefined ? order[status] : 9999;
+  return w.maturityEnd || w.maturityPeak || w.maturityStart || 9999;
 }
 
 function formatPrice(val) {
