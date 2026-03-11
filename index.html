@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ma Cave à Vin</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="header-content">
+      <h1>Ma Cave à Vin</h1>
+      <div class="stats" id="stats"></div>
+    </div>
+  </header>
+
+  <main>
+    <section class="controls">
+      <div class="search-bar">
+        <input type="text" id="search" placeholder="Rechercher un vin..." autocomplete="off">
+      </div>
+      <div class="filters">
+        <select id="filterColor">
+          <option value="">Toutes les couleurs</option>
+        </select>
+        <select id="filterCountry">
+          <option value="">Tous les pays</option>
+        </select>
+        <select id="filterSort">
+          <option value="name-asc">Nom A-Z</option>
+          <option value="name-desc">Nom Z-A</option>
+          <option value="vintage-desc">Millésime (récent)</option>
+          <option value="vintage-asc">Millésime (ancien)</option>
+          <option value="value-desc">Valeur (haute)</option>
+          <option value="value-asc">Valeur (basse)</option>
+          <option value="bottles-desc">Bouteilles (plus)</option>
+          <option value="maturity-asc">Maturité (proche)</option>
+        </select>
+        <select id="filterMaturity">
+          <option value="">Toutes maturités</option>
+          <option value="not-ready">Pas encore prêt</option>
+          <option value="ready">Prêt à boire</option>
+          <option value="peak">Au pic</option>
+          <option value="past">Passé le pic</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="results-info" id="resultsInfo"></section>
+
+    <section class="wine-grid" id="wineGrid"></section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
