@@ -28,7 +28,7 @@ function maturityLabel(status) {
 }
 
 function maturitySortValue(w) {
-  return w.maturityEnd || w.maturityPeak || w.maturityStart || 9999;
+  return w.maturityEnd || w.maturityPeak || w.maturityStart || 0;
 }
 
 function formatPrice(val) {
@@ -90,7 +90,7 @@ function toggleSort(field) {
     currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
   } else {
     currentSort.field = field;
-    currentSort.dir = field === 'name' ? 'asc' : 'desc';
+    currentSort.dir = (field === 'name' || field === 'maturity' || field === 'color' || field === 'country') ? 'asc' : 'desc';
   }
   applyFilters();
 }
