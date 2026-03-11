@@ -218,14 +218,24 @@ async function searchSAQ(params) {
   if (params.country) phraseParts.push(params.country);
   const phrase = phraseParts.filter(Boolean).join(' ');
 
+  const pageSize = params.page_size || 24;
   const query = `{
-    productSearch(phrase: "${phrase.replace(/"/g, '\\"')}", page_size: 15) {
+    productSearch(phrase: "${phrase.replace(/"/g, '\\"')}", page_size: ${pageSize}) {
       total_count
       items {
+        product {
+          sku
+          price_range {
+            minimum_price {
+              final_price { value currency }
+            }
+          }
+        }
         productView {
           name
           sku
           urlKey
+          inStock
           attributes { name value }
         }
       }
@@ -254,23 +264,48 @@ async function searchSAQ(params) {
   return items
     .map((item) => {
       const pv = item.productView;
+      const prod = item.product || {};
       const attrs = {};
       for (const a of pv.attributes || []) {
         if (a.value && a.value !== '') attrs[a.name] = a.value;
       }
+      // Parse availability_front (can be string or array)
+      let availability = attrs.availability_front || '';
+      if (typeof availability === 'string' && availability.startsWith('[')) {
+        try { availability = JSON.parse(availability.replace(/'/g, '"')); } catch {}
+      }
+      if (!Array.isArray(availability)) availability = availability ? [availability] : [];
+      // Parse store_availability_list
+      let stores = attrs.store_availability_list || '';
+      if (typeof stores === 'string' && stores.startsWith('[')) {
+        try { stores = JSON.parse(stores.replace(/'/g, '"')); } catch {}
+      }
+      if (!Array.isArray(stores)) stores = stores ? [stores] : [];
+      // Parse grape (can be array or string)
+      let grape = attrs.cepage || '';
+      if (typeof grape === 'string' && grape.startsWith('[')) {
+        try { grape = JSON.parse(grape.replace(/'/g, '"')); } catch {}
+      }
+      if (Array.isArray(grape)) grape = grape.join(', ');
+
+      const price = prod.price_range?.minimum_price?.final_price?.value || null;
+
       return {
         name: pv.name || '',
         sku: pv.sku || '',
         url: 'https://www.saq.com/fr/' + (pv.urlKey || pv.sku),
         color: attrs.couleur || '',
-        grape: attrs.cepage || '',
-        country: attrs.pays || '',
-        region: attrs.region || '',
-        vintage: attrs.millesime || '',
-        format: attrs.format || '',
+        grape,
+        country: attrs.pays_origine || attrs.pays || '',
+        region: attrs.region_origine || attrs.region || '',
+        vintage: attrs.millesime_produit || attrs.millesime || '',
+        format: attrs.format_contenant_ml || attrs.format || '',
         alcohol: attrs.taux_alcool || '',
-        price: attrs.prix_saq || attrs.regular_price || '',
-        availability: Array.isArray(attrs.availability_front) ? attrs.availability_front[0] : (attrs.availability_front || ''),
+        price,
+        pastille: attrs.pastille_gout || '',
+        availability,
+        stores,
+        inStock: pv.inStock || false,
       };
     })
     .filter((w) => w.color && !w.url.includes('blog') && !w.url.includes('recette'));
@@ -393,13 +428,16 @@ async function handleChat(request, env, user) {
   const isGuideMode = body.message === '__GUIDE_PROFIL__';
   const isCellar = user.type === 'cellar';
 
-  // Load preferences and cepages for this user
-  const [prefsRaw, cepagesRaw] = await Promise.all([
+  // Load preferences, cepages, and SAQ store for this user
+  const kvKeys = [
     env.API_KEYS.get(userKey(user.username, 'taste_profile')),
     env.API_KEYS.get(userKey(user.username, 'taste_cepages')),
-  ]);
+  ];
+  if (!isCellar) kvKeys.push(env.API_KEYS.get(userKey(user.username, 'saq_store')));
+  const [prefsRaw, cepagesRaw, saqStoreRaw] = await Promise.all(kvKeys);
   const prefs = prefsRaw ? JSON.parse(prefsRaw) : [];
   const cepages = cepagesRaw ? JSON.parse(cepagesRaw) : [];
+  const saqStore = saqStoreRaw || '';
 
   let profileSection = '';
   if (cepages.length > 0) {
@@ -408,6 +446,9 @@ async function handleChat(request, env, user) {
   profileSection += prefs.length > 0
     ? '\nPREFERENCES PERSONNELLES ACTUELLES:\n' + prefs.map((p) => '- ' + p).join('\n') + '\n'
     : '\nPREFERENCES PERSONNELLES: (aucune pour le moment)\n';
+  if (saqStore) {
+    profileSection += '\nSUCCURSALE PREFEREE: ' + saqStore + ' (priorise les vins disponibles a cette succursale quand possible)\n';
+  }
 
   let systemPrompt;
   let tools = undefined;
@@ -481,28 +522,37 @@ async function handleChat(request, env, user) {
 
     const claudeData = await claudeRes.json();
 
-    // Check if Claude wants to use a tool
+    // Check if Claude wants to use tools
     if (claudeData.stop_reason === 'tool_use') {
-      const toolUse = claudeData.content.find((c) => c.type === 'tool_use');
-      if (toolUse && toolUse.name === 'search_saq') {
-        // Execute SAQ search
-        let saqResults;
-        try {
-          saqResults = await searchSAQ(toolUse.input);
-        } catch (err) {
-          saqResults = [{ error: err.message }];
-        }
-
-        // Add assistant response and tool result to messages
-        messages.push({ role: 'assistant', content: claudeData.content });
-        messages.push({
-          role: 'user',
-          content: [{
+      const toolUses = claudeData.content.filter((c) => c.type === 'tool_use');
+      if (toolUses.length > 0) {
+        // Execute all tool calls in parallel
+        const toolResults = await Promise.all(toolUses.map(async (toolUse) => {
+          if (toolUse.name === 'search_saq') {
+            let saqResults;
+            try {
+              saqResults = await searchSAQ(toolUse.input);
+            } catch (err) {
+              saqResults = [{ error: err.message }];
+            }
+            return {
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: JSON.stringify(saqResults),
+            };
+          }
+          // Unknown tool — return error
+          return {
             type: 'tool_result',
             tool_use_id: toolUse.id,
-            content: JSON.stringify(saqResults),
-          }],
-        });
+            content: JSON.stringify({ error: 'Unknown tool: ' + toolUse.name }),
+            is_error: true,
+          };
+        }));
+
+        // Add assistant response and all tool results to messages
+        messages.push({ role: 'assistant', content: claudeData.content });
+        messages.push({ role: 'user', content: toolResults });
         continue; // Loop back to get Claude's final response
       }
     }
@@ -597,6 +647,44 @@ export default {
         }
         await Promise.all(writes);
         return jsonResponse({ ok: true }, 200, request);
+      }
+    }
+
+    // SAQ search (SAQ users only)
+    if (request.method === 'GET' && path === '/saq/search') {
+      const user = await isAuthorized(request, env);
+      if (!user) return jsonResponse({ error: 'Non autorisé' }, 401, request);
+      if (user.type !== 'saq') return jsonResponse({ error: 'SAQ seulement' }, 403, request);
+      const q = url.searchParams.get('q') || '';
+      if (!q.trim()) return jsonResponse({ results: [], total: 0 }, 200, request);
+      try {
+        const results = await searchSAQ({
+          query: q,
+          color: url.searchParams.get('color') || '',
+          grape: url.searchParams.get('grape') || '',
+          country: url.searchParams.get('country') || '',
+          page_size: 24,
+        });
+        return jsonResponse({ results, total: results.length }, 200, request);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500, request);
+      }
+    }
+
+    // SAQ preferred store (SAQ users only)
+    if (path === '/saq/store') {
+      const user = await isAuthorized(request, env);
+      if (!user) return jsonResponse({ error: 'Non autorisé' }, 401, request);
+      if (user.type !== 'saq') return jsonResponse({ error: 'SAQ seulement' }, 403, request);
+      if (request.method === 'GET') {
+        const store = await env.API_KEYS.get(userKey(user.username, 'saq_store'));
+        return jsonResponse({ store: store || '' }, 200, request);
+      }
+      if (request.method === 'POST') {
+        const body = await request.json();
+        const storeId = (body.store || '').trim();
+        await env.API_KEYS.put(userKey(user.username, 'saq_store'), storeId);
+        return jsonResponse({ ok: true, store: storeId }, 200, request);
       }
     }
 

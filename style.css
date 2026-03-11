@@ -673,51 +673,250 @@ main {
   border: 1px solid #4a3080;
 }
 
-/* SAQ hero section */
-.saq-hero {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 50vh;
-  padding: 2rem;
+/* SAQ search section */
+.saq-section {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 1rem 2rem;
 }
 
-.saq-hero-content {
-  text-align: center;
-  max-width: 500px;
-}
-
-.saq-hero-content h2 {
-  font-size: 2rem;
-  color: var(--gold-light);
+.saq-search-controls {
   margin-bottom: 1rem;
 }
 
-.saq-hero-content p {
-  font-size: 1.1rem;
-  color: var(--text-muted);
-  line-height: 1.6;
-  margin-bottom: 2rem;
+.saq-search-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
 }
 
-.saq-start-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 1rem 2rem;
+.saq-search-bar input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.saq-search-bar input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+.saq-search-btn {
+  padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 12px;
+  border-radius: 8px;
   background: linear-gradient(135deg, #2a1f5e, #4a3080);
   color: var(--gold-light);
-  font-size: 1.1rem;
   font-weight: 600;
   cursor: pointer;
-  transition: opacity 0.2s, transform 0.2s;
+  white-space: nowrap;
 }
 
-.saq-start-btn:hover {
+.saq-search-btn:hover {
   opacity: 0.9;
-  transform: scale(1.03);
+}
+
+.saq-filters {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.saq-filters select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.saq-results-info {
+  padding: 0.25rem 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  min-height: 1.5rem;
+}
+
+.saq-store-warning {
+  color: var(--orange);
+}
+
+.saq-loading {
+  text-align: center;
+  padding: 3rem;
+  color: var(--text-muted);
+}
+
+.saq-empty-state {
+  text-align: center;
+  padding: 3rem;
+  color: var(--text-muted);
+  font-size: 1.05rem;
+}
+
+.saq-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.saq-card {
+  background: var(--bg-card);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  transition: border-color 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.saq-card:hover {
+  border-color: var(--gold);
+}
+
+.saq-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.saq-card-name {
+  font-weight: 600;
+  font-size: 1rem;
+  line-height: 1.3;
+  flex: 1;
+}
+
+.saq-card-price {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--gold);
+  white-space: nowrap;
+}
+
+.saq-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.saq-card-vintage {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.saq-pastille {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 10px;
+  background: rgba(76, 175, 80, 0.15);
+  color: #81C784;
+  border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.saq-card-grape {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.saq-card-origin {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.saq-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: auto;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.saq-card-avail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.saq-avail-badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.saq-avail-online {
+  background: rgba(76, 175, 80, 0.2);
+  color: #81C784;
+}
+
+.saq-avail-store {
+  background: rgba(66, 165, 245, 0.2);
+  color: #64B5F6;
+}
+
+.saq-avail-mystore {
+  background: rgba(186, 104, 200, 0.2);
+  color: #CE93D8;
+}
+
+.saq-avail-other {
+  background: rgba(158, 158, 158, 0.2);
+  color: #BDBDBD;
+}
+
+.saq-card-link {
+  font-size: 0.8rem;
+  color: var(--gold);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.saq-card-link:hover {
+  text-decoration: underline;
+}
+
+/* SAQ store selector in profile */
+.saq-store-select {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+.saq-store-saved {
+  font-size: 0.85rem;
+  color: var(--green);
+  margin-top: 0.25rem;
+}
+
+.profile-store-desc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+@media (max-width: 600px) {
+  .saq-card-grid {
+    grid-template-columns: 1fr;
+  }
+  .saq-search-bar {
+    flex-direction: column;
+  }
 }
 
 /* Floating action buttons */

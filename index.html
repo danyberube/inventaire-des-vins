@@ -140,6 +140,15 @@
         </form>
       </div>
 
+      <div class="profile-section saq-store-section" id="saqStoreSection" style="display:none">
+        <h4>Ma succursale SAQ</h4>
+        <p class="profile-store-desc">Selectionnez votre succursale pour filtrer les vins disponibles pres de chez vous.</p>
+        <select id="saqStoreSelect" class="saq-store-select">
+          <option value="">-- Choisir une succursale --</option>
+        </select>
+        <p class="saq-store-saved" id="saqStoreSaved" style="display:none">Succursale sauvegardee!</p>
+      </div>
+
       <div class="profile-section profile-guide-section">
         <h4>Guide interactif</h4>
         <p class="profile-guide-desc">Laissez le sommelier vous poser des questions pour mieux definir votre profil.</p>
@@ -170,12 +179,30 @@
     </form>
   </div>
 
-  <!-- SAQ hero (shown for SAQ users instead of wine grid) -->
-  <section class="saq-hero" id="saqHero" style="display:none">
-    <div class="saq-hero-content">
-      <h2>Mon Sommelier SAQ</h2>
-      <p>Decrivez votre plat ou occasion et je vous trouverai le vin parfait a la SAQ!</p>
-      <button class="saq-start-btn" id="saqStartChat">&#127863; Parler au sommelier</button>
+  <!-- SAQ search section (shown for SAQ users instead of wine grid) -->
+  <section class="saq-section" id="saqSection" style="display:none">
+    <div class="saq-search-controls">
+      <form class="saq-search-bar" id="saqSearchForm">
+        <input type="text" id="saqSearchInput" placeholder="Rechercher un vin... (ex: pinot noir, chablis, barolo)" autocomplete="off">
+        <button type="submit" class="saq-search-btn">Rechercher</button>
+      </form>
+      <div class="saq-filters">
+        <select id="saqFilterAvailability">
+          <option value="">Toutes disponibilites</option>
+          <option value="online">Disponible en ligne</option>
+          <option value="store">Ma succursale</option>
+        </select>
+        <select id="saqFilterColor">
+          <option value="">Toutes couleurs</option>
+          <option value="Rouge">Rouge</option>
+          <option value="Blanc">Blanc</option>
+          <option value="Rose">Rose</option>
+        </select>
+      </div>
+    </div>
+    <div class="saq-results-info" id="saqResultsInfo"></div>
+    <div class="saq-results" id="saqResults">
+      <div class="saq-empty-state">Recherchez un vin dans le catalogue de la SAQ</div>
     </div>
   </section>
 
