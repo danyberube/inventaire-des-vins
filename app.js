@@ -415,6 +415,15 @@ async function init() {
     input.value = '';
   });
   document.getElementById('startGuideBtn').addEventListener('click', startTasteGuide);
+  document.getElementById('guideBack').addEventListener('click', exitGuide);
+  document.getElementById('guideClose').addEventListener('click', () => {
+    exitGuide();
+    toggleProfile();
+  });
+  document.getElementById('guideChatForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    sendGuideMessage(document.getElementById('guideChatInput').value);
+  });
   loadPreferences();
   document.getElementById('chatForm').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -562,17 +571,96 @@ async function addCepage(text) {
   await savePreferences();
 }
 
+// Guide chat (separate from sommelier chat)
+let guideHistory = [];
+let guideActive = false;
+
 function startTasteGuide() {
-  const profilePanel = document.getElementById('profilePanel');
-  const chatPanel = document.getElementById('chatPanel');
+  // Switch to guide view inside profile panel
+  guideActive = true;
+  guideHistory = [];
+  document.getElementById('profileBody').style.display = 'none';
+  document.getElementById('profileHeaderMain').style.display = 'none';
+  document.getElementById('profileHeaderGuide').style.display = '';
+  const messagesEl = document.getElementById('guideChatMessages');
+  messagesEl.style.display = '';
+  messagesEl.innerHTML = '';
+  document.getElementById('guideChatForm').style.display = '';
 
-  // Close profile, open chat
-  profilePanel.classList.remove('open');
-  chatPanel.classList.add('open');
+  // Send the initial guide prompt
+  sendGuideMessage('__GUIDE_PROFIL__', true);
+}
 
-  // Send a guided profiling prompt
-  const guidePrompt = '__GUIDE_PROFIL__';
-  sendChatMessage(guidePrompt, true);
+function exitGuide() {
+  guideActive = false;
+  document.getElementById('profileBody').style.display = '';
+  document.getElementById('profileHeaderMain').style.display = '';
+  document.getElementById('profileHeaderGuide').style.display = 'none';
+  document.getElementById('guideChatMessages').style.display = 'none';
+  document.getElementById('guideChatForm').style.display = 'none';
+  // Reload preferences to show any new ones from the guide
+  loadPreferences();
+}
+
+function addGuideBubble(text, type) {
+  const messages = document.getElementById('guideChatMessages');
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble chat-bubble-' + type;
+  if (type === 'ai') {
+    bubble.innerHTML = formatChatText(text);
+  } else {
+    bubble.textContent = text;
+  }
+  messages.appendChild(bubble);
+  messages.scrollTop = messages.scrollHeight;
+  return bubble;
+}
+
+async function sendGuideMessage(text, isInitial = false) {
+  if (!text.trim()) return;
+
+  if (!isInitial) addGuideBubble(text, 'user');
+  const input = document.getElementById('guideChatInput');
+  const sendBtn = document.querySelector('.guide-chat-send');
+  input.value = '';
+  input.disabled = true;
+  sendBtn.disabled = true;
+
+  const typingText = isInitial ? 'Preparation du guide...' : 'Reflexion en cours...';
+  const typing = addGuideBubble(typingText, 'ai');
+  typing.classList.add('chat-typing');
+
+  try {
+    const message = isInitial ? '__GUIDE_PROFIL__' : text;
+    const res = await fetch(API_URL + '/chat', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, history: guideHistory }),
+    });
+
+    typing.remove();
+
+    if (!res.ok) {
+      addGuideBubble('Desolee, une erreur est survenue. Reessayez.', 'ai');
+      return;
+    }
+
+    const data = await res.json();
+    const userContent = isInitial ? 'Je veux definir mon profil de gouts. Guide-moi!' : text;
+    guideHistory.push({ role: 'user', content: userContent });
+    guideHistory.push({ role: 'assistant', content: data.reply });
+    addGuideBubble(data.reply, 'ai');
+
+    // Reload preferences in case they were updated
+    loadPreferences();
+  } catch {
+    typing.remove();
+    addGuideBubble('Erreur de connexion. Verifiez votre reseau.', 'ai');
+  } finally {
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+  }
 }
 
 // Chat

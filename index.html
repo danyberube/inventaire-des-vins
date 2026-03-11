@@ -90,10 +90,18 @@
 
   <!-- Taste Profile Panel -->
   <div class="profile-panel" id="profilePanel">
-    <div class="profile-header">
+    <div class="profile-header" id="profileHeaderMain">
       <h3>Mon Profil de Gouts</h3>
       <button id="profileClose" class="panel-close">&#10005;</button>
     </div>
+    <!-- Guide chat header (hidden by default) -->
+    <div class="profile-header profile-header-guide" id="profileHeaderGuide" style="display:none">
+      <button id="guideBack" class="guide-back-btn">&#8592;</button>
+      <h3>Guide interactif</h3>
+      <button id="guideClose" class="panel-close">&#10005;</button>
+    </div>
+
+    <!-- Profile view -->
     <div class="profile-body" id="profileBody">
       <p class="profile-intro">Vos preferences guident les recommandations du sommelier IA.</p>
 
@@ -135,6 +143,13 @@
         <button class="profile-guide-btn" id="startGuideBtn">&#9733; Demarrer le guide</button>
       </div>
     </div>
+
+    <!-- Guide chat view (hidden by default) -->
+    <div class="guide-chat-messages" id="guideChatMessages" style="display:none"></div>
+    <form class="chat-form guide-chat-form" id="guideChatForm" style="display:none">
+      <input type="text" id="guideChatInput" placeholder="Votre reponse..." autocomplete="off">
+      <button type="submit" class="chat-send guide-chat-send">&#10148;</button>
+    </form>
   </div>
 
   <!-- Chat Panel -->
