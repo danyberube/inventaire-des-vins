@@ -218,47 +218,51 @@ async function searchSAQ(params) {
   if (params.country) phraseParts.push(params.country);
   const phrase = phraseParts.filter(Boolean).join(' ');
 
-  const pageSize = params.page_size || 24;
-  const query = `{
-    productSearch(phrase: "${phrase.replace(/"/g, '\\"')}", page_size: ${pageSize}) {
+  const gqlQuery = `query($phrase: String!, $pageSize: Int, $currentPage: Int, $filter: [SearchClauseInput!]) {
+    productSearch(phrase: $phrase, page_size: $pageSize, current_page: $currentPage, filter: $filter) {
       total_count
       items {
-        product {
-          sku
-          price_range {
-            minimum_price {
-              final_price { value currency }
-            }
-          }
-        }
-        productView {
-          name
-          sku
-          urlKey
-          inStock
-          attributes { name value }
-        }
+        product { sku price_range { minimum_price { final_price { value currency } } } }
+        productView { name sku urlKey inStock attributes { name value } }
       }
     }
   }`;
 
-  const res = await fetch(SAQ_GQL_ENDPOINT, {
-    method: 'POST',
-    headers: SAQ_GQL_HEADERS,
-    body: JSON.stringify({ query }),
-  });
+  const baseFilter = [{ attribute: 'visibility', in: ['Search', 'Catalog, Search'] }];
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error('SAQ API error ' + res.status + ': ' + errText);
+  // Two parallel requests: page 1 (name matches) + deep page (grape/attribute matches)
+  const fetchPage = async (page, size) => {
+    const res = await fetch(SAQ_GQL_ENDPOINT, {
+      method: 'POST',
+      headers: SAQ_GQL_HEADERS,
+      body: JSON.stringify({
+        query: gqlQuery,
+        variables: { phrase, pageSize: size, currentPage: page, filter: baseFilter },
+      }),
+    });
+    if (!res.ok) throw new Error('SAQ API error ' + res.status);
+    const data = await res.json();
+    if (data.errors) throw new Error('SAQ GraphQL error: ' + data.errors[0].message);
+    return data.data?.productSearch || { items: [], total_count: 0 };
+  };
+
+  // Fetch page 1 (100 top results) + deep page for grape matches
+  const [page1, deepPage] = await Promise.all([
+    fetchPage(1, 100),
+    fetchPage(51, 100), // items 5001-5100 — past name matches, into grape matches
+  ]);
+
+  // Merge and deduplicate by SKU
+  const seen = new Set();
+  const allItems = [];
+  for (const item of [...page1.items, ...deepPage.items]) {
+    const sku = item.productView?.sku || item.product?.sku;
+    if (sku && !seen.has(sku)) {
+      seen.add(sku);
+      allItems.push(item);
+    }
   }
-
-  const data = await res.json();
-  if (data.errors) {
-    throw new Error('SAQ GraphQL error: ' + data.errors[0].message);
-  }
-
-  const items = data.data?.productSearch?.items || [];
+  const items = allItems;
 
   // Filter and transform results
   return items
@@ -663,7 +667,7 @@ export default {
           color: url.searchParams.get('color') || '',
           grape: url.searchParams.get('grape') || '',
           country: url.searchParams.get('country') || '',
-          page_size: 24,
+          page_size: 100,
         });
         return jsonResponse({ results, total: results.length }, 200, request);
       } catch (err) {
