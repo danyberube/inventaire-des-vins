@@ -849,6 +849,53 @@ main {
   color: var(--red-badge);
 }
 
+.cepage-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.cepage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(76, 175, 80, 0.12);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: 20px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  color: #81C784;
+  transition: border-color 0.15s;
+}
+
+.cepage-chip:hover {
+  border-color: var(--green);
+}
+
+.cepage-chip-delete {
+  background: none;
+  border: none;
+  color: rgba(129, 199, 132, 0.5);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.cepage-chip-delete:hover {
+  color: var(--red-badge);
+}
+
+.cepage-count {
+  background: var(--green);
+}
+
+.cepage-add-btn {
+  background: linear-gradient(135deg, #2d5a2e, #4CAF50);
+}
+
 .pref-add-form {
   display: flex;
   gap: 0.5rem;

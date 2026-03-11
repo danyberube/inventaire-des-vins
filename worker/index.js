@@ -222,12 +222,14 @@ async function handleChat(request, env) {
 
   const isGuideMode = body.message === '__GUIDE_PROFIL__';
 
-  // Load preferences and wines in parallel
-  const [wines, prefsRaw] = await Promise.all([
+  // Load preferences, cepages and wines in parallel
+  const [wines, prefsRaw, cepagesRaw] = await Promise.all([
     fetchWines(env),
     env.API_KEYS.get('taste_profile'),
+    env.API_KEYS.get('taste_cepages'),
   ]);
   const prefs = prefsRaw ? JSON.parse(prefsRaw) : [];
+  const cepages = cepagesRaw ? JSON.parse(cepagesRaw) : [];
 
   const inventory = wines.map((w) => {
     const parts = [w.name];
@@ -242,12 +244,16 @@ async function handleChat(request, env) {
     return parts.join(' | ');
   }).join('\n');
 
-  const prefsSection = prefs.length > 0
+  let profileSection = '';
+  if (cepages.length > 0) {
+    profileSection += '\nCEPAGES FAVORIS: ' + cepages.join(', ') + '\n';
+  }
+  profileSection += prefs.length > 0
     ? '\nPREFERENCES PERSONNELLES ACTUELLES:\n' + prefs.map((p) => '- ' + p).join('\n') + '\n'
     : '\nPREFERENCES PERSONNELLES: (aucune pour le moment)\n';
 
   const basePrompt = isGuideMode ? GUIDE_PROMPT : SOMMELIER_PROMPT;
-  const systemPrompt = basePrompt + prefsSection + '\nINVENTAIRE DE LA CAVE:\n' + inventory;
+  const systemPrompt = basePrompt + profileSection + '\nINVENTAIRE DE LA CAVE:\n' + inventory;
 
   const messages = [];
   if (body.history && Array.isArray(body.history)) {
@@ -338,14 +344,25 @@ export default {
         return jsonResponse({ error: 'Non autorisé' }, 401, request);
       }
       if (request.method === 'GET') {
-        const raw = await env.API_KEYS.get('taste_profile');
-        return jsonResponse({ preferences: raw ? JSON.parse(raw) : [] }, 200, request);
+        const [rawPrefs, rawCepages] = await Promise.all([
+          env.API_KEYS.get('taste_profile'),
+          env.API_KEYS.get('taste_cepages'),
+        ]);
+        return jsonResponse({
+          preferences: rawPrefs ? JSON.parse(rawPrefs) : [],
+          cepages: rawCepages ? JSON.parse(rawCepages) : [],
+        }, 200, request);
       }
       if (request.method === 'POST') {
         const body = await request.json();
+        const writes = [];
         if (body.preferences && Array.isArray(body.preferences)) {
-          await env.API_KEYS.put('taste_profile', JSON.stringify(body.preferences));
+          writes.push(env.API_KEYS.put('taste_profile', JSON.stringify(body.preferences)));
         }
+        if (body.cepages && Array.isArray(body.cepages)) {
+          writes.push(env.API_KEYS.put('taste_cepages', JSON.stringify(body.cepages)));
+        }
+        await Promise.all(writes);
         return jsonResponse({ ok: true }, 200, request);
       }
     }

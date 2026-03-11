@@ -108,6 +108,20 @@
       </div>
 
       <div class="profile-section">
+        <div class="profile-section-header">
+          <h4>Cepages favoris</h4>
+          <span class="pref-count cepage-count" id="cepageCount">0</span>
+        </div>
+        <div class="cepage-list" id="cepageList">
+          <p class="pref-empty" id="cepageEmpty">Aucun cepage favori.</p>
+        </div>
+        <form class="pref-add-form" id="cepageAddForm">
+          <input type="text" id="cepageInput" placeholder="Ex: Pinot Noir, Syrah..." autocomplete="off">
+          <button type="submit" class="pref-add-btn cepage-add-btn" title="Ajouter">+</button>
+        </form>
+      </div>
+
+      <div class="profile-section">
         <h4>Ajouter une preference</h4>
         <form class="pref-add-form" id="prefAddForm">
           <input type="text" id="prefInput" placeholder="Ex: Je prefere les vins corses..." autocomplete="off">

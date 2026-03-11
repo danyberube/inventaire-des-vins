@@ -408,6 +408,12 @@ async function init() {
     addPreference(input.value);
     input.value = '';
   });
+  document.getElementById('cepageAddForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('cepageInput');
+    addCepage(input.value);
+    input.value = '';
+  });
   document.getElementById('startGuideBtn').addEventListener('click', startTasteGuide);
   loadPreferences();
   document.getElementById('chatForm').addEventListener('submit', (e) => {
@@ -440,6 +446,7 @@ async function init() {
 
 // Preferences / Profile
 let preferences = [];
+let cepages = [];
 
 function toggleProfile() {
   const panel = document.getElementById('profilePanel');
@@ -456,7 +463,9 @@ async function loadPreferences() {
     if (!res.ok) return;
     const data = await res.json();
     preferences = data.preferences || [];
+    cepages = data.cepages || [];
     renderPreferences();
+    renderCepages();
   } catch {}
 }
 
@@ -465,7 +474,7 @@ async function savePreferences() {
     await fetch(API_URL + '/preferences', {
       method: 'POST',
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ preferences }),
+      body: JSON.stringify({ preferences, cepages }),
     });
   } catch {}
 }
@@ -507,6 +516,49 @@ async function addPreference(text) {
   if (!trimmed || preferences.includes(trimmed)) return;
   preferences.push(trimmed);
   renderPreferences();
+  await savePreferences();
+}
+
+function renderCepages() {
+  const list = document.getElementById('cepageList');
+  const empty = document.getElementById('cepageEmpty');
+  const count = document.getElementById('cepageCount');
+
+  count.textContent = cepages.length;
+
+  if (cepages.length === 0) {
+    list.innerHTML = '';
+    list.appendChild(empty);
+    empty.style.display = '';
+    return;
+  }
+
+  empty.style.display = 'none';
+  list.innerHTML = cepages.map((c, i) => `
+    <span class="cepage-chip">
+      ${escapeHtml(c)}
+      <button class="cepage-chip-delete" data-index="${i}" title="Supprimer">&#10005;</button>
+    </span>
+  `).join('');
+
+  list.querySelectorAll('.cepage-chip-delete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.index);
+      cepages.splice(idx, 1);
+      renderCepages();
+      await savePreferences();
+    });
+  });
+}
+
+async function addCepage(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  // Capitalize first letter
+  const formatted = trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+  if (cepages.includes(formatted)) return;
+  cepages.push(formatted);
+  renderCepages();
   await savePreferences();
 }
 
