@@ -161,9 +161,40 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+const API_URL = 'https://wine-api-proxy.dany-b53.workers.dev';
+
+async function loadWines() {
+  const indicator = document.getElementById('syncIndicator');
+
+  try {
+    const res = await fetch(API_URL);
+    if (!res.ok) throw new Error('API error ' + res.status);
+    wines = await res.json();
+    if (indicator) {
+      indicator.textContent = 'Données en direct';
+      indicator.className = 'sync-indicator sync-live';
+    }
+  } catch (e) {
+    // Fallback to static wines.json
+    try {
+      const res = await fetch('wines.json');
+      wines = await res.json();
+      if (indicator) {
+        indicator.textContent = 'Données hors-ligne';
+        indicator.className = 'sync-indicator sync-offline';
+      }
+    } catch (e2) {
+      wines = [];
+      if (indicator) {
+        indicator.textContent = 'Erreur de chargement';
+        indicator.className = 'sync-indicator sync-offline';
+      }
+    }
+  }
+}
+
 async function init() {
-  const res = await fetch('wines.json');
-  wines = await res.json();
+  await loadWines();
   renderStats();
   populateFilters();
   applyFilters();
@@ -173,6 +204,19 @@ async function init() {
   document.getElementById('filterCountry').addEventListener('change', applyFilters);
   document.getElementById('filterSort').addEventListener('change', applyFilters);
   document.getElementById('filterMaturity').addEventListener('change', applyFilters);
+
+  const syncBtn = document.getElementById('syncBtn');
+  if (syncBtn) {
+    syncBtn.addEventListener('click', async () => {
+      syncBtn.disabled = true;
+      syncBtn.textContent = '⟳';
+      await loadWines();
+      renderStats();
+      applyFilters();
+      syncBtn.disabled = false;
+      syncBtn.textContent = '↻';
+    });
+  }
 }
 
 init();

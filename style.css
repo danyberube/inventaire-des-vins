@@ -38,17 +38,67 @@ header {
 .header-content {
   max-width: 1400px;
   margin: 0 auto;
+}
+
+.header-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
   gap: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 h1 {
   font-size: 1.8rem;
   color: var(--gold-light);
   letter-spacing: 0.5px;
+}
+
+.sync-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sync-indicator {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 12px;
+}
+
+.sync-live {
+  background: rgba(76, 175, 80, 0.2);
+  color: #81C784;
+}
+
+.sync-offline {
+  background: rgba(255, 152, 0, 0.2);
+  color: #FFB74D;
+}
+
+.sync-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--gold-light);
+  font-size: 1.2rem;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.sync-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.sync-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .stats {
