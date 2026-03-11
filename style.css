@@ -577,6 +577,73 @@ main {
   min-height: 1.2em;
 }
 
+/* API section */
+.api-section {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.api-section h3 {
+  color: var(--gold-light);
+  font-size: 1rem;
+  margin-bottom: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.api-url-box {
+  margin-bottom: 0.75rem;
+}
+
+.api-url-box label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 0.3rem;
+}
+
+.api-url-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.api-url-row input {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-family: monospace;
+  outline: none;
+}
+
+.api-url-row button, .rotate-btn {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.api-url-row button:hover, .rotate-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.rotate-btn {
+  margin-top: 0.5rem;
+  border-color: var(--wine-light);
+  color: var(--wine-light);
+}
+
 @media (max-width: 768px) {
   header {
     padding: 1rem;

@@ -52,9 +52,20 @@ function getCookie(request, name) {
   return match ? match[1] : null;
 }
 
+async function getApiKey(env) {
+  const kvKey = await env.API_KEYS.get('current');
+  return kvKey || env.API_KEY;
+}
+
+async function verifyApiKey(key, env) {
+  if (!key) return false;
+  const current = await getApiKey(env);
+  return current && key === current;
+}
+
 async function isAuthorized(request, env) {
   const apiKey = request.headers.get('X-API-Key');
-  if (apiKey && env.API_KEY && apiKey === env.API_KEY) return true;
+  if (apiKey && await verifyApiKey(apiKey, env)) return true;
   const auth = request.headers.get('Authorization') || '';
   if (auth.startsWith('Bearer ')) {
     const token = auth.slice(7);
@@ -168,7 +179,7 @@ export default {
     // Public route with API key in query param
     if (request.method === 'GET' && path === '/public/cellar') {
       const key = url.searchParams.get('key');
-      if (!key || !env.API_KEY || key !== env.API_KEY) {
+      if (!key || !(await verifyApiKey(key, env))) {
         return jsonResponse({ error: 'Non autorisé' }, 401, request);
       }
       try {
@@ -176,6 +187,33 @@ export default {
       } catch (err) {
         return jsonResponse({ error: err.message }, 500, request);
       }
+    }
+
+    // API info (requires session auth)
+    if (request.method === 'GET' && path === '/api-info') {
+      if (!(await isAuthorized(request, env))) {
+        return jsonResponse({ error: 'Non autorisé' }, 401, request);
+      }
+      const apiKey = await getApiKey(env);
+      return jsonResponse({
+        key: apiKey,
+        url: url.origin + '/public/cellar?key=' + apiKey,
+      }, 200, request);
+    }
+
+    // Rotate API key (requires session auth)
+    if (request.method === 'POST' && path === '/rotate-key') {
+      if (!(await isAuthorized(request, env))) {
+        return jsonResponse({ error: 'Non autorisé' }, 401, request);
+      }
+      const bytes = new Uint8Array(24);
+      crypto.getRandomValues(bytes);
+      const newKey = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+      await env.API_KEYS.put('current', newKey);
+      return jsonResponse({
+        key: newKey,
+        url: url.origin + '/public/cellar?key=' + newKey,
+      }, 200, request);
     }
 
     // All other routes require auth

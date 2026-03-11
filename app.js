@@ -393,6 +393,39 @@ async function init() {
   }
 
   document.getElementById('logoutBtn').addEventListener('click', logout);
+
+  // API info section
+  loadApiInfo();
+  document.getElementById('copyUrlBtn').addEventListener('click', () => {
+    navigator.clipboard.writeText(document.getElementById('apiUrl').value);
+    document.getElementById('copyUrlBtn').textContent = 'Copie!';
+    setTimeout(() => document.getElementById('copyUrlBtn').textContent = 'Copier', 1500);
+  });
+  document.getElementById('copyKeyBtn').addEventListener('click', () => {
+    navigator.clipboard.writeText(document.getElementById('apiKey').value);
+    document.getElementById('copyKeyBtn').textContent = 'Copie!';
+    setTimeout(() => document.getElementById('copyKeyBtn').textContent = 'Copier', 1500);
+  });
+  document.getElementById('rotateKeyBtn').addEventListener('click', async () => {
+    if (!confirm('Regenerer la cle API? L\'ancienne cle cessera de fonctionner.')) return;
+    const res = await fetch(API_URL + '/rotate-key', { method: 'POST', headers: authHeaders() });
+    if (res.ok) {
+      const data = await res.json();
+      document.getElementById('apiUrl').value = data.url;
+      document.getElementById('apiKey').value = data.key;
+    }
+  });
+}
+
+async function loadApiInfo() {
+  try {
+    const res = await fetch(API_URL + '/api-info', { headers: authHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    document.getElementById('apiUrl').value = data.url;
+    document.getElementById('apiKey').value = data.key;
+    document.getElementById('apiSection').style.display = '';
+  } catch {}
 }
 
 document.getElementById('loginForm').addEventListener('submit', async (e) => {

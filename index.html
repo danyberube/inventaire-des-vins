@@ -57,6 +57,25 @@
     <section class="results-info" id="resultsInfo"></section>
 
     <section class="wine-grid" id="wineGrid"></section>
+
+    <section class="api-section" id="apiSection" style="display:none">
+      <h3>Acces API</h3>
+      <div class="api-url-box">
+        <label>URL publique (JSON)</label>
+        <div class="api-url-row">
+          <input type="text" id="apiUrl" readonly>
+          <button id="copyUrlBtn" title="Copier">Copier</button>
+        </div>
+      </div>
+      <div class="api-url-box">
+        <label>Cle API</label>
+        <div class="api-url-row">
+          <input type="text" id="apiKey" readonly>
+          <button id="copyKeyBtn" title="Copier">Copier</button>
+        </div>
+      </div>
+      <button id="rotateKeyBtn" class="rotate-btn">Regenerer la cle</button>
+    </section>
   </main>
 
   <div class="login-overlay" id="loginScreen" style="display:none">
