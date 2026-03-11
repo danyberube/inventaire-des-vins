@@ -9,8 +9,7 @@ function corsHeaders(request) {
   return {
     'Access-Control-Allow-Origin': allowed,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
-    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, Authorization',
     'Access-Control-Max-Age': '86400',
   };
 }
@@ -56,6 +55,11 @@ function getCookie(request, name) {
 async function isAuthorized(request, env) {
   const apiKey = request.headers.get('X-API-Key');
   if (apiKey && env.API_KEY && apiKey === env.API_KEY) return true;
+  const auth = request.headers.get('Authorization') || '';
+  if (auth.startsWith('Bearer ')) {
+    const token = auth.slice(7);
+    if (await verifySession(token, env)) return true;
+  }
   const sessionToken = getCookie(request, 'session');
   return verifySession(sessionToken, env);
 }
@@ -73,9 +77,7 @@ async function handleLogin(request, env) {
   }
 
   const session = await createSession(env);
-  return jsonResponse({ ok: true }, 200, request, {
-    'Set-Cookie': `session=${session}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=2592000`,
-  });
+  return jsonResponse({ ok: true, token: session }, 200, request);
 }
 
 function handleLogout(request) {

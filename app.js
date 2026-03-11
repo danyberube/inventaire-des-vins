@@ -284,18 +284,25 @@ function showApp() {
   document.querySelector('main').style.display = '';
 }
 
+function authHeaders() {
+  const token = localStorage.getItem('session');
+  return token ? { 'Authorization': 'Bearer ' + token } : {};
+}
+
 async function login(password) {
   const res = await fetch(API_URL + '/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
     body: JSON.stringify({ password }),
   });
-  return res.ok;
+  if (!res.ok) return false;
+  const data = await res.json();
+  if (data.token) localStorage.setItem('session', data.token);
+  return true;
 }
 
 async function logout() {
-  await fetch(API_URL + '/logout', { credentials: 'include' });
+  localStorage.removeItem('session');
   showLogin();
 }
 
@@ -303,7 +310,7 @@ async function loadWines() {
   const indicator = document.getElementById('syncIndicator');
 
   try {
-    const res = await fetch(API_URL, { credentials: 'include' });
+    const res = await fetch(API_URL, { headers: authHeaders() });
     if (res.status === 401) {
       showLogin();
       return false;
