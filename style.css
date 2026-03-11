@@ -887,7 +887,11 @@ main {
 }
 
 /* SAQ store selector in profile */
-.saq-store-select {
+.saq-store-autocomplete {
+  position: relative;
+  margin-top: 0.5rem;
+}
+.saq-store-input {
   width: 100%;
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--border);
@@ -895,7 +899,47 @@ main {
   background: var(--bg-card);
   color: var(--text);
   font-size: 0.9rem;
-  margin-top: 0.5rem;
+  box-sizing: border-box;
+}
+.saq-store-input:focus { border-color: var(--accent); outline: none; }
+.saq-store-dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  z-index: 50;
+}
+.saq-store-dropdown.open { display: block; }
+.saq-store-option {
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+.saq-store-option:hover, .saq-store-option.active {
+  background: var(--accent);
+  color: #fff;
+}
+.saq-store-option .store-banner {
+  font-size: 0.75rem;
+  opacity: 0.6;
+  margin-left: 0.3rem;
+}
+.saq-store-group-label {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+  pointer-events: none;
 }
 
 .saq-store-saved {

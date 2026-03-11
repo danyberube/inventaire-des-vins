@@ -143,9 +143,10 @@
       <div class="profile-section saq-store-section" id="saqStoreSection" style="display:none">
         <h4>Ma succursale SAQ</h4>
         <p class="profile-store-desc">Selectionnez votre succursale pour filtrer les vins disponibles pres de chez vous.</p>
-        <select id="saqStoreSelect" class="saq-store-select">
-          <option value="">-- Choisir une succursale --</option>
-        </select>
+        <div class="saq-store-autocomplete" id="saqStoreAutocomplete">
+          <input type="text" id="saqStoreInput" class="saq-store-input" placeholder="Rechercher une succursale..." autocomplete="off">
+          <div class="saq-store-dropdown" id="saqStoreDropdown"></div>
+        </div>
         <p class="saq-store-saved" id="saqStoreSaved" style="display:none">Succursale sauvegardee!</p>
       </div>
 
