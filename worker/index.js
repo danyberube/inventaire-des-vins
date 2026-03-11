@@ -150,7 +150,7 @@ async function handleWines(request, env) {
   });
 }
 
-const SOMMELIER_PROMPT = `Tu es un sommelier expert et chaleureux. L'utilisateur possede une cave a vin personnelle dont l'inventaire complet est fourni ci-dessous.
+const SOMMELIER_PROMPT = `Tu es un sommelier expert et chaleureux, le sommelier personnel de l'utilisateur. Tu connais ses gouts et sa cave intimement.
 
 Quand on te decrit un plat ou un repas, recommande 1 a 3 vins de cette cave qui s'y marieraient bien. Pour chaque vin recommande:
 - Le nom exact et le millesime tel qu'il apparait dans l'inventaire
@@ -163,8 +163,15 @@ Regles:
 - Si aucun vin ne convient parfaitement, suggere le meilleur compromis et explique pourquoi
 - Reponds en francais, de facon concise et chaleureuse
 - Tu peux aussi repondre a des questions generales sur le vin et la cave
+- Tiens compte des PREFERENCES PERSONNELLES ci-dessous pour tes recommandations
 
-INVENTAIRE DE LA CAVE:
+DETECTION DE PREFERENCES:
+Quand l'utilisateur exprime une preference (ex: "j'adore les vins corses", "je n'aime pas les blancs boises", "le Barolo est mon prefere", "retiens que..."), tu dois l'extraire et l'ajouter a la fin de ta reponse dans un bloc JSON invisible:
+<!--PREFS_UPDATE:{"add":["preference en texte court"]}-->
+Pour supprimer une preference existante:
+<!--PREFS_UPDATE:{"remove":["texte exact de la preference a retirer"]}-->
+Si l'utilisateur demande de voir ses preferences ou son profil, liste-les.
+N'ajoute le bloc PREFS_UPDATE que quand une NOUVELLE preference est clairement exprimee. Ne le mets pas si c'est juste une question ou un commentaire ponctuel.
 `;
 
 async function handleChat(request, env) {
@@ -183,7 +190,13 @@ async function handleChat(request, env) {
     return jsonResponse({ error: 'Anthropic API key not configured' }, 500, request);
   }
 
-  const wines = await fetchWines(env);
+  // Load preferences and wines in parallel
+  const [wines, prefsRaw] = await Promise.all([
+    fetchWines(env),
+    env.API_KEYS.get('taste_profile'),
+  ]);
+  const prefs = prefsRaw ? JSON.parse(prefsRaw) : [];
+
   const inventory = wines.map((w) => {
     const parts = [w.name];
     if (w.vintage) parts.push(w.vintage);
@@ -197,7 +210,11 @@ async function handleChat(request, env) {
     return parts.join(' | ');
   }).join('\n');
 
-  const systemPrompt = SOMMELIER_PROMPT + inventory;
+  const prefsSection = prefs.length > 0
+    ? '\nPREFERENCES PERSONNELLES:\n' + prefs.map((p) => '- ' + p).join('\n') + '\n'
+    : '\nPREFERENCES PERSONNELLES: (aucune pour le moment)\n';
+
+  const systemPrompt = SOMMELIER_PROMPT + prefsSection + '\nINVENTAIRE DE LA CAVE:\n' + inventory;
 
   const messages = [];
   if (body.history && Array.isArray(body.history)) {
@@ -230,9 +247,28 @@ async function handleChat(request, env) {
   }
 
   const claudeData = await claudeRes.json();
-  const reply = claudeData.content && claudeData.content[0] ? claudeData.content[0].text : '';
+  let reply = claudeData.content && claudeData.content[0] ? claudeData.content[0].text : '';
 
-  return jsonResponse({ reply }, 200, request);
+  // Extract and apply preference updates
+  const prefsMatch = reply.match(/<!--PREFS_UPDATE:(.*?)-->/);
+  if (prefsMatch) {
+    try {
+      const update = JSON.parse(prefsMatch[1]);
+      let updated = [...prefs];
+      if (update.add) {
+        for (const p of update.add) {
+          if (!updated.includes(p)) updated.push(p);
+        }
+      }
+      if (update.remove) {
+        updated = updated.filter((p) => !update.remove.includes(p));
+      }
+      await env.API_KEYS.put('taste_profile', JSON.stringify(updated));
+    } catch {}
+    reply = reply.replace(/<!--PREFS_UPDATE:.*?-->/g, '').trim();
+  }
+
+  return jsonResponse({ reply, preferences: prefs.length + (prefsMatch ? 1 : 0) }, 200, request);
 }
 
 export default {
@@ -258,6 +294,24 @@ export default {
     if (request.method === 'GET' && path === '/check') {
       const authed = await isAuthorized(request, env);
       return jsonResponse({ authenticated: authed }, 200, request);
+    }
+
+    // Get/update taste preferences
+    if (path === '/preferences') {
+      if (!(await isAuthorized(request, env))) {
+        return jsonResponse({ error: 'Non autorisé' }, 401, request);
+      }
+      if (request.method === 'GET') {
+        const raw = await env.API_KEYS.get('taste_profile');
+        return jsonResponse({ preferences: raw ? JSON.parse(raw) : [] }, 200, request);
+      }
+      if (request.method === 'POST') {
+        const body = await request.json();
+        if (body.preferences && Array.isArray(body.preferences)) {
+          await env.API_KEYS.put('taste_profile', JSON.stringify(body.preferences));
+        }
+        return jsonResponse({ ok: true }, 200, request);
+      }
     }
 
     // Chat with sommelier AI (requires session auth)
