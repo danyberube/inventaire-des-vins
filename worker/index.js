@@ -97,11 +97,9 @@ function handleLogout(request) {
   });
 }
 
-async function handleWines(request, env) {
+async function fetchWines(env) {
   const token = env.ALFRED_TOKEN;
-  if (!token) {
-    return jsonResponse({ error: 'Token not configured' }, 500, request);
-  }
+  if (!token) throw new Error('Token not configured');
 
   const apiRes = await fetch('https://prod.cellars.io/search/catalog', {
     method: 'POST',
@@ -123,14 +121,12 @@ async function handleWines(request, env) {
     }),
   });
 
-  if (!apiRes.ok) {
-    return jsonResponse({ error: 'Alfred API error', status: apiRes.status }, 502, request);
-  }
+  if (!apiRes.ok) throw new Error('Alfred API error ' + apiRes.status);
 
   const raw = await apiRes.json();
   const products = (raw.data && raw.data.data) || raw.data || [];
 
-  const wines = products.map((w) => ({
+  return products.map((w) => ({
     name: w.name || '',
     vintage: w.vintage || null,
     color: w.color && w.color.name ? w.color.name.fr || '' : '',
@@ -145,10 +141,98 @@ async function handleWines(request, env) {
     maturityPeak: w.maturityE || null,
     maturityEnd: w.maturityF || null,
   }));
+}
 
+async function handleWines(request, env) {
+  const wines = await fetchWines(env);
   return jsonResponse(wines, 200, request, {
     'Cache-Control': 'private, max-age=300',
   });
+}
+
+const SOMMELIER_PROMPT = `Tu es un sommelier expert et chaleureux. L'utilisateur possede une cave a vin personnelle dont l'inventaire complet est fourni ci-dessous.
+
+Quand on te decrit un plat ou un repas, recommande 1 a 3 vins de cette cave qui s'y marieraient bien. Pour chaque vin recommande:
+- Le nom exact et le millesime tel qu'il apparait dans l'inventaire
+- Une breve explication de pourquoi ce vin convient a ce plat
+
+Regles:
+- Ne recommande QUE des vins presents dans l'inventaire ci-dessous
+- Prefere les vins dont la maturite indique "pret" ou "au pic" (annee actuelle: ${new Date().getFullYear()})
+- Si plusieurs bouteilles sont disponibles, mentionne-le
+- Si aucun vin ne convient parfaitement, suggere le meilleur compromis et explique pourquoi
+- Reponds en francais, de facon concise et chaleureuse
+- Tu peux aussi repondre a des questions generales sur le vin et la cave
+
+INVENTAIRE DE LA CAVE:
+`;
+
+async function handleChat(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: 'Invalid JSON' }, 400, request);
+  }
+
+  if (!body.message) {
+    return jsonResponse({ error: 'Message requis' }, 400, request);
+  }
+
+  if (!env.ANTHROPIC_API_KEY) {
+    return jsonResponse({ error: 'Anthropic API key not configured' }, 500, request);
+  }
+
+  const wines = await fetchWines(env);
+  const inventory = wines.map((w) => {
+    const parts = [w.name];
+    if (w.vintage) parts.push(w.vintage);
+    parts.push(w.color);
+    if (w.country) parts.push(w.country);
+    if (w.regions) parts.push(w.regions);
+    parts.push(w.bottles + ' bout.');
+    if (w.maturityStart || w.maturityPeak || w.maturityEnd) {
+      parts.push('maturite: ' + [w.maturityStart, w.maturityPeak, w.maturityEnd].filter(Boolean).join('-'));
+    }
+    return parts.join(' | ');
+  }).join('\n');
+
+  const systemPrompt = SOMMELIER_PROMPT + inventory;
+
+  const messages = [];
+  if (body.history && Array.isArray(body.history)) {
+    for (const msg of body.history) {
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        messages.push({ role: msg.role, content: msg.content });
+      }
+    }
+  }
+  messages.push({ role: 'user', content: body.message });
+
+  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages,
+    }),
+  });
+
+  if (!claudeRes.ok) {
+    const errText = await claudeRes.text();
+    return jsonResponse({ error: 'Erreur IA: ' + claudeRes.status, detail: errText }, 502, request);
+  }
+
+  const claudeData = await claudeRes.json();
+  const reply = claudeData.content && claudeData.content[0] ? claudeData.content[0].text : '';
+
+  return jsonResponse({ reply }, 200, request);
 }
 
 export default {
@@ -174,6 +258,18 @@ export default {
     if (request.method === 'GET' && path === '/check') {
       const authed = await isAuthorized(request, env);
       return jsonResponse({ authenticated: authed }, 200, request);
+    }
+
+    // Chat with sommelier AI (requires session auth)
+    if (request.method === 'POST' && path === '/chat') {
+      if (!(await isAuthorized(request, env))) {
+        return jsonResponse({ error: 'Non autorisé' }, 401, request);
+      }
+      try {
+        return await handleChat(request, env);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500, request);
+      }
     }
 
     // Public route with API key in query param

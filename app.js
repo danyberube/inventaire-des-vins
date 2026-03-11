@@ -394,6 +394,15 @@ async function init() {
 
   document.getElementById('logoutBtn').addEventListener('click', logout);
 
+  // Chat
+  document.getElementById('chatToggle').style.display = '';
+  document.getElementById('chatToggle').addEventListener('click', toggleChat);
+  document.getElementById('chatClose').addEventListener('click', toggleChat);
+  document.getElementById('chatForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    sendChatMessage(document.getElementById('chatInput').value);
+  });
+
   // API info section
   loadApiInfo();
   document.getElementById('copyUrlBtn').addEventListener('click', () => {
@@ -415,6 +424,76 @@ async function init() {
       document.getElementById('apiKey').value = data.key;
     }
   });
+}
+
+// Chat
+let chatHistory = [];
+
+function toggleChat() {
+  const panel = document.getElementById('chatPanel');
+  panel.classList.toggle('open');
+}
+
+function addChatBubble(text, type) {
+  const messages = document.getElementById('chatMessages');
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble chat-bubble-' + type;
+  if (type === 'ai') {
+    bubble.innerHTML = formatChatText(text);
+  } else {
+    bubble.textContent = text;
+  }
+  messages.appendChild(bubble);
+  messages.scrollTop = messages.scrollHeight;
+  return bubble;
+}
+
+function formatChatText(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
+}
+
+async function sendChatMessage(text) {
+  if (!text.trim()) return;
+
+  addChatBubble(text, 'user');
+  const input = document.getElementById('chatInput');
+  const sendBtn = document.querySelector('.chat-send');
+  input.value = '';
+  input.disabled = true;
+  sendBtn.disabled = true;
+
+  const typing = addChatBubble('Reflexion en cours...', 'ai');
+  typing.classList.add('chat-typing');
+
+  try {
+    const res = await fetch(API_URL + '/chat', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, history: chatHistory }),
+    });
+
+    typing.remove();
+
+    if (!res.ok) {
+      addChatBubble('Desolee, une erreur est survenue. Reessayez.', 'ai');
+      return;
+    }
+
+    const data = await res.json();
+    chatHistory.push({ role: 'user', content: text });
+    chatHistory.push({ role: 'assistant', content: data.reply });
+    addChatBubble(data.reply, 'ai');
+  } catch {
+    typing.remove();
+    addChatBubble('Erreur de connexion. Verifiez votre reseau.', 'ai');
+  } finally {
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+  }
 }
 
 async function loadApiInfo() {
