@@ -1,5 +1,7 @@
 let wines = [];
 let filtered = [];
+let currentSort = { field: 'name', dir: 'asc' };
+let viewMode = localStorage.getItem('viewMode') || 'table';
 
 const currentYear = new Date().getFullYear();
 
@@ -23,6 +25,13 @@ function maturityLabel(status) {
     case 'past': return 'Passé le pic';
     default: return '';
   }
+}
+
+function maturitySortValue(w) {
+  const status = getMaturityStatus(w);
+  if (!status) return 9999;
+  const order = { 'peak': 0, 'ready': 1, 'not-ready': 2, 'past': 3 };
+  return order[status] !== undefined ? order[status] : 9999;
 }
 
 function formatPrice(val) {
@@ -79,11 +88,20 @@ function populateFilters() {
   });
 }
 
+function toggleSort(field) {
+  if (currentSort.field === field) {
+    currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    currentSort.field = field;
+    currentSort.dir = field === 'name' ? 'asc' : 'desc';
+  }
+  applyFilters();
+}
+
 function applyFilters() {
   const search = document.getElementById('search').value.toLowerCase().trim();
   const color = document.getElementById('filterColor').value;
   const country = document.getElementById('filterCountry').value;
-  const sort = document.getElementById('filterSort').value;
   const maturity = document.getElementById('filterMaturity').value;
 
   filtered = wines.filter(w => {
@@ -97,7 +115,7 @@ function applyFilters() {
     return true;
   });
 
-  const [field, dir] = sort.split('-');
+  const { field, dir } = currentSort;
   filtered.sort((a, b) => {
     let va, vb;
     switch (field) {
@@ -105,7 +123,9 @@ function applyFilters() {
       case 'vintage': va = a.vintage || 0; vb = b.vintage || 0; break;
       case 'value': va = a.marketValue || 0; vb = b.marketValue || 0; break;
       case 'bottles': va = a.bottles || 0; vb = b.bottles || 0; break;
-      case 'maturity': va = a.maturityPeak || 9999; vb = b.maturityPeak || 9999; break;
+      case 'maturity': va = maturitySortValue(a); vb = maturitySortValue(b); break;
+      case 'color': va = a.color || ''; vb = b.color || ''; return dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+      case 'country': va = a.country || ''; vb = b.country || ''; return dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
     }
     return dir === 'asc' ? va - vb : vb - va;
   });
@@ -113,8 +133,15 @@ function applyFilters() {
   renderWines();
 }
 
+function sortArrow(field) {
+  const active = currentSort.field === field;
+  const upClass = active && currentSort.dir === 'asc' ? 'active' : '';
+  const downClass = active && currentSort.dir === 'desc' ? 'active' : '';
+  return `<span class="sort-arrows"><span class="arrow-up ${upClass}">&#9650;</span><span class="arrow-down ${downClass}">&#9660;</span></span>`;
+}
+
 function renderWines() {
-  const grid = document.getElementById('wineGrid');
+  const container = document.getElementById('wineGrid');
   const info = document.getElementById('resultsInfo');
 
   const filteredBottles = filtered.reduce((sum, w) => sum + (w.bottles || 0), 0);
@@ -123,11 +150,56 @@ function renderWines() {
     (filteredValue > 0 ? ` — Valeur: ${formatPrice(filteredValue)}` : '');
 
   if (filtered.length === 0) {
-    grid.innerHTML = '<div class="empty-state">Aucun vin trouvé pour ces critères.</div>';
+    container.innerHTML = '<div class="empty-state">Aucun vin trouvé pour ces critères.</div>';
     return;
   }
 
-  grid.innerHTML = filtered.map(w => {
+  if (viewMode === 'table') {
+    renderTable(container);
+  } else {
+    renderCards(container);
+  }
+}
+
+function renderTable(container) {
+  const header = `<thead><tr>
+    <th class="th-sortable" data-sort="name">${sortArrow('name')} Nom</th>
+    <th class="th-sortable th-center" data-sort="vintage">${sortArrow('vintage')} Mill.</th>
+    <th class="th-sortable th-center" data-sort="color">${sortArrow('color')} Couleur</th>
+    <th class="th-sortable" data-sort="country">${sortArrow('country')} Pays / Région</th>
+    <th class="th-sortable th-center" data-sort="bottles">${sortArrow('bottles')} Bout.</th>
+    <th class="th-sortable th-center" data-sort="maturity">${sortArrow('maturity')} Maturité</th>
+    <th class="th-sortable th-right" data-sort="value">${sortArrow('value')} Valeur</th>
+  </tr></thead>`;
+
+  const rows = filtered.map(w => {
+    const status = getMaturityStatus(w);
+    const maturityWindow = [];
+    if (w.maturityStart) maturityWindow.push(w.maturityStart);
+    if (w.maturityPeak) maturityWindow.push(w.maturityPeak);
+    if (w.maturityEnd) maturityWindow.push(w.maturityEnd);
+    const maturityText = status ? `<span class="maturity-pill maturity-${status}">${maturityLabel(status)}</span>${maturityWindow.length ? `<span class="maturity-years">${maturityWindow.join('-')}</span>` : ''}` : '';
+
+    return `<tr>
+      <td class="td-name">${escapeHtml(w.name)}${w.format !== 750 ? ` <span class="format-tag">${formatML(w.format)}</span>` : ''}</td>
+      <td class="td-center">${w.vintage || 'NV'}</td>
+      <td class="td-center"><span class="badge-sm ${colorBadgeClass(w.color)}">${escapeHtml(w.color || '')}</span></td>
+      <td>${escapeHtml(w.country)}${w.regions ? ' <span class="td-regions">' + escapeHtml(w.regions) + '</span>' : ''}</td>
+      <td class="td-center">${w.bottles || 0}</td>
+      <td class="td-center">${maturityText}</td>
+      <td class="td-right td-price">${w.marketValue ? formatPrice(w.marketValue) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  container.innerHTML = `<div class="table-wrapper"><table class="wine-table">${header}<tbody>${rows}</tbody></table></div>`;
+
+  container.querySelectorAll('.th-sortable').forEach(th => {
+    th.addEventListener('click', () => toggleSort(th.dataset.sort));
+  });
+}
+
+function renderCards(container) {
+  container.innerHTML = '<div class="card-grid">' + filtered.map(w => {
     const status = getMaturityStatus(w);
     const maturityWindow = [];
     if (w.maturityStart) maturityWindow.push(w.maturityStart);
@@ -152,13 +224,53 @@ function renderWines() {
         </div>
       </div>
     `;
-  }).join('');
+  }).join('') + '</div>';
+}
+
+function downloadFile(content, filename, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportCSV() {
+  const headers = ['Nom', 'Millésime', 'Couleur', 'Pays', 'Régions', 'Format (mL)', 'Bouteilles', 'Valeur marchande ($)', 'Maturité début', 'Maturité pic', 'Maturité fin'];
+  const rows = wines.map(w => [
+    '"' + (w.name || '').replace(/"/g, '""') + '"',
+    w.vintage || '',
+    w.color || '',
+    '"' + (w.country || '').replace(/"/g, '""') + '"',
+    '"' + (w.regions || '').replace(/"/g, '""') + '"',
+    w.format || 750,
+    w.bottles || 0,
+    w.marketValue || '',
+    w.maturityStart || '',
+    w.maturityPeak || '',
+    w.maturityEnd || '',
+  ].join(','));
+  const csv = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
+  downloadFile(csv, 'inventaire-vins.csv', 'text/csv;charset=utf-8');
+}
+
+function exportJSON() {
+  downloadFile(JSON.stringify(wines, null, 2), 'inventaire-vins.json', 'application/json');
 }
 
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+function setViewMode(mode) {
+  viewMode = mode;
+  localStorage.setItem('viewMode', mode);
+  document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === mode));
+  renderWines();
 }
 
 const API_URL = 'https://wine-api-proxy.dany-b53.workers.dev';
@@ -175,7 +287,6 @@ async function loadWines() {
       indicator.className = 'sync-indicator sync-live';
     }
   } catch (e) {
-    // Fallback to static wines.json
     try {
       const res = await fetch('wines.json');
       wines = await res.json();
@@ -202,8 +313,30 @@ async function init() {
   document.getElementById('search').addEventListener('input', applyFilters);
   document.getElementById('filterColor').addEventListener('change', applyFilters);
   document.getElementById('filterCountry').addEventListener('change', applyFilters);
-  document.getElementById('filterSort').addEventListener('change', applyFilters);
   document.getElementById('filterMaturity').addEventListener('change', applyFilters);
+
+  document.querySelectorAll('.view-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === viewMode);
+    btn.addEventListener('click', () => setViewMode(btn.dataset.view));
+  });
+
+  const downloadBtn = document.getElementById('downloadBtn');
+  const downloadMenu = document.getElementById('downloadMenu');
+  if (downloadBtn && downloadMenu) {
+    downloadBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      downloadMenu.classList.toggle('open');
+    });
+    downloadMenu.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const format = btn.dataset.format;
+        if (format === 'csv') exportCSV();
+        if (format === 'json') exportJSON();
+        downloadMenu.classList.remove('open');
+      });
+    });
+    document.addEventListener('click', () => downloadMenu.classList.remove('open'));
+  }
 
   const syncBtn = document.getElementById('syncBtn');
   if (syncBtn) {

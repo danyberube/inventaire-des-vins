@@ -14,6 +14,13 @@
         <div class="sync-controls">
           <span class="sync-indicator" id="syncIndicator">Chargement...</span>
           <button class="sync-btn" id="syncBtn" title="Rafraîchir depuis Alfred">↻</button>
+          <div class="download-wrapper">
+            <button class="sync-btn" id="downloadBtn" title="Télécharger l'inventaire">↓</button>
+            <div class="download-menu" id="downloadMenu">
+              <button data-format="csv">CSV</button>
+              <button data-format="json">JSON</button>
+            </div>
+          </div>
         </div>
       </div>
       <div class="stats" id="stats"></div>
@@ -32,16 +39,6 @@
         <select id="filterCountry">
           <option value="">Tous les pays</option>
         </select>
-        <select id="filterSort">
-          <option value="name-asc">Nom A-Z</option>
-          <option value="name-desc">Nom Z-A</option>
-          <option value="vintage-desc">Millésime (récent)</option>
-          <option value="vintage-asc">Millésime (ancien)</option>
-          <option value="value-desc">Valeur (haute)</option>
-          <option value="value-asc">Valeur (basse)</option>
-          <option value="bottles-desc">Bouteilles (plus)</option>
-          <option value="maturity-asc">Maturité (proche)</option>
-        </select>
         <select id="filterMaturity">
           <option value="">Toutes maturités</option>
           <option value="not-ready">Pas encore prêt</option>
@@ -49,6 +46,10 @@
           <option value="peak">Au pic</option>
           <option value="past">Passé le pic</option>
         </select>
+        <div class="view-toggle">
+          <button class="view-btn" data-view="table" title="Vue tableau">☰</button>
+          <button class="view-btn" data-view="cards" title="Vue cartes">▦</button>
+        </div>
       </div>
     </section>
 
