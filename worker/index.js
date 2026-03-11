@@ -165,6 +165,19 @@ export default {
       return jsonResponse({ authenticated: authed }, 200, request);
     }
 
+    // Public route with API key in query param
+    if (request.method === 'GET' && path === '/public/cellar') {
+      const key = url.searchParams.get('key');
+      if (!key || !env.API_KEY || key !== env.API_KEY) {
+        return jsonResponse({ error: 'Non autorisé' }, 401, request);
+      }
+      try {
+        return await handleWines(request, env);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500, request);
+      }
+    }
+
     // All other routes require auth
     if (request.method === 'GET' && (path === '/' || path === '/wines')) {
       if (!(await isAuthorized(request, env))) {
