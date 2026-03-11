@@ -10,7 +10,10 @@
   <header>
     <div class="header-content">
       <div class="header-top">
-        <h1>Ma Cave à Vin</h1>
+        <div class="header-title-group">
+          <h1 id="appTitle">Ma Cave à Vin</h1>
+          <span class="user-badge" id="userBadge" style="display:none"></span>
+        </div>
         <div class="sync-controls">
           <span class="sync-indicator" id="syncIndicator">Chargement...</span>
           <button class="sync-btn" id="syncBtn" title="Rafraîchir depuis Alfred">↻</button>
@@ -167,10 +170,20 @@
     </form>
   </div>
 
+  <!-- SAQ hero (shown for SAQ users instead of wine grid) -->
+  <section class="saq-hero" id="saqHero" style="display:none">
+    <div class="saq-hero-content">
+      <h2>Mon Sommelier SAQ</h2>
+      <p>Decrivez votre plat ou occasion et je vous trouverai le vin parfait a la SAQ!</p>
+      <button class="saq-start-btn" id="saqStartChat">&#127863; Parler au sommelier</button>
+    </div>
+  </section>
+
   <div class="login-overlay" id="loginScreen" style="display:none">
     <div class="login-box">
-      <h2>Ma Cave à Vin</h2>
+      <h2>Sommelier IA</h2>
       <form id="loginForm">
+        <input type="text" id="loginUsername" placeholder="Nom d'utilisateur" autocomplete="username" required>
         <input type="password" id="loginPassword" placeholder="Mot de passe" autocomplete="current-password" required>
         <button type="submit">Entrer</button>
         <p class="login-error" id="loginError"></p>

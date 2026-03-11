@@ -2,6 +2,8 @@ let wines = [];
 let filtered = [];
 let currentSort = { field: 'name', dir: 'asc' };
 let viewMode = localStorage.getItem('viewMode') || 'table';
+let userType = localStorage.getItem('userType') || null;
+let displayName = localStorage.getItem('displayName') || null;
 
 const currentYear = new Date().getFullYear();
 
@@ -282,6 +284,46 @@ function showApp() {
   document.getElementById('loginScreen').style.display = 'none';
   document.querySelector('header').style.display = '';
   document.querySelector('main').style.display = '';
+
+  const isSAQ = userType === 'saq';
+  const title = document.getElementById('appTitle');
+  const badge = document.getElementById('userBadge');
+  const saqHero = document.getElementById('saqHero');
+
+  // Title & badge
+  title.textContent = isSAQ ? 'Mon Sommelier SAQ' : 'Ma Cave à Vin';
+  if (displayName) {
+    badge.textContent = displayName;
+    badge.className = 'user-badge user-badge-' + userType;
+    badge.style.display = '';
+  }
+
+  // Cellar-specific elements
+  const cellarElements = ['syncBtn', 'downloadBtn', 'syncIndicator', 'apiSection'];
+  cellarElements.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = isSAQ ? 'none' : '';
+  });
+
+  // Controls & wine grid
+  const controls = document.querySelector('.controls');
+  const resultsInfo = document.getElementById('resultsInfo');
+  const wineGrid = document.getElementById('wineGrid');
+  const stats = document.getElementById('stats');
+
+  if (isSAQ) {
+    if (controls) controls.style.display = 'none';
+    if (resultsInfo) resultsInfo.style.display = 'none';
+    if (wineGrid) wineGrid.style.display = 'none';
+    if (stats) stats.style.display = 'none';
+    if (saqHero) saqHero.style.display = '';
+  } else {
+    if (controls) controls.style.display = '';
+    if (resultsInfo) resultsInfo.style.display = '';
+    if (wineGrid) wineGrid.style.display = '';
+    if (stats) stats.style.display = '';
+    if (saqHero) saqHero.style.display = 'none';
+  }
 }
 
 function authHeaders() {
@@ -289,20 +331,30 @@ function authHeaders() {
   return token ? { 'Authorization': 'Bearer ' + token } : {};
 }
 
-async function login(password) {
+async function login(username, password) {
   const res = await fetch(API_URL + '/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ username, password }),
   });
   if (!res.ok) return false;
   const data = await res.json();
-  if (data.token) localStorage.setItem('session', data.token);
+  if (data.token) {
+    localStorage.setItem('session', data.token);
+    localStorage.setItem('userType', data.type);
+    localStorage.setItem('displayName', data.displayName);
+    userType = data.type;
+    displayName = data.displayName;
+  }
   return true;
 }
 
 async function logout() {
   localStorage.removeItem('session');
+  localStorage.removeItem('userType');
+  localStorage.removeItem('displayName');
+  userType = null;
+  displayName = null;
   showLogin();
 }
 
@@ -343,53 +395,102 @@ async function loadWines() {
 }
 
 async function init() {
-  const loaded = await loadWines();
-  if (!loaded) return; // login screen shown
-
-  showApp();
-  renderStats();
-  populateFilters();
-  applyFilters();
-
-  document.getElementById('search').addEventListener('input', applyFilters);
-  document.getElementById('filterColor').addEventListener('change', applyFilters);
-  document.getElementById('filterCountry').addEventListener('change', applyFilters);
-  document.getElementById('filterMaturity').addEventListener('change', applyFilters);
-
-  document.querySelectorAll('.view-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.view === viewMode);
-    btn.addEventListener('click', () => setViewMode(btn.dataset.view));
-  });
-
-  const downloadBtn = document.getElementById('downloadBtn');
-  const downloadMenu = document.getElementById('downloadMenu');
-  if (downloadBtn && downloadMenu) {
-    downloadBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      downloadMenu.classList.toggle('open');
-    });
-    downloadMenu.querySelectorAll('button').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const format = btn.dataset.format;
-        if (format === 'csv') exportCSV();
-        if (format === 'json') exportJSON();
-        downloadMenu.classList.remove('open');
-      });
-    });
-    document.addEventListener('click', () => downloadMenu.classList.remove('open'));
+  // Check auth + get user info
+  try {
+    const checkRes = await fetch(API_URL + '/check', { headers: authHeaders() });
+    const checkData = await checkRes.json();
+    if (!checkData.authenticated) {
+      showLogin();
+      return;
+    }
+    userType = checkData.type;
+    displayName = checkData.displayName;
+    localStorage.setItem('userType', userType);
+    localStorage.setItem('displayName', displayName);
+  } catch {
+    // Fallback to stored values
+    if (!localStorage.getItem('session')) {
+      showLogin();
+      return;
+    }
   }
 
-  const syncBtn = document.getElementById('syncBtn');
-  if (syncBtn) {
-    syncBtn.addEventListener('click', async () => {
-      syncBtn.disabled = true;
-      syncBtn.textContent = '⟳';
-      await loadWines();
-      renderStats();
-      applyFilters();
-      syncBtn.disabled = false;
-      syncBtn.textContent = '↻';
+  const isSAQ = userType === 'saq';
+
+  if (!isSAQ) {
+    const loaded = await loadWines();
+    if (!loaded) return;
+  }
+
+  showApp();
+
+  if (!isSAQ) {
+    renderStats();
+    populateFilters();
+    applyFilters();
+  }
+
+  // Set chat welcome messages based on user type
+  const chatMessages = document.getElementById('chatMessages');
+  if (chatMessages) {
+    const welcomeMsg = isSAQ
+      ? 'Bonjour! Decrivez-moi votre plat ou occasion et je vous trouverai le vin parfait a la SAQ.'
+      : 'Bonjour! Decrivez-moi votre plat et je vous recommanderai un vin de votre cave.';
+    chatMessages.innerHTML = `<div class="chat-bubble chat-bubble-ai">${welcomeMsg}</div>`;
+  }
+
+  const chatInput = document.getElementById('chatInput');
+  if (chatInput) {
+    chatInput.placeholder = isSAQ ? 'Decrivez votre plat ou occasion...' : 'Decrivez votre plat...';
+  }
+
+  if (!isSAQ) {
+    document.getElementById('search').addEventListener('input', applyFilters);
+    document.getElementById('filterColor').addEventListener('change', applyFilters);
+    document.getElementById('filterCountry').addEventListener('change', applyFilters);
+    document.getElementById('filterMaturity').addEventListener('change', applyFilters);
+
+    document.querySelectorAll('.view-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.view === viewMode);
+      btn.addEventListener('click', () => setViewMode(btn.dataset.view));
     });
+
+    const downloadBtn = document.getElementById('downloadBtn');
+    const downloadMenu = document.getElementById('downloadMenu');
+    if (downloadBtn && downloadMenu) {
+      downloadBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        downloadMenu.classList.toggle('open');
+      });
+      downloadMenu.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const format = btn.dataset.format;
+          if (format === 'csv') exportCSV();
+          if (format === 'json') exportJSON();
+          downloadMenu.classList.remove('open');
+        });
+      });
+      document.addEventListener('click', () => downloadMenu.classList.remove('open'));
+    }
+
+    const syncBtn = document.getElementById('syncBtn');
+    if (syncBtn) {
+      syncBtn.addEventListener('click', async () => {
+        syncBtn.disabled = true;
+        syncBtn.textContent = '⟳';
+        await loadWines();
+        renderStats();
+        applyFilters();
+        syncBtn.disabled = false;
+        syncBtn.textContent = '↻';
+      });
+    }
+  }
+
+  // SAQ hero button
+  const saqStartBtn = document.getElementById('saqStartChat');
+  if (saqStartBtn) {
+    saqStartBtn.addEventListener('click', toggleChat);
   }
 
   document.getElementById('logoutBtn').addEventListener('click', logout);
@@ -430,8 +531,8 @@ async function init() {
     sendChatMessage(document.getElementById('chatInput').value);
   });
 
-  // API info section
-  loadApiInfo();
+  // API info section (cellar users only)
+  if (!isSAQ) loadApiInfo();
   document.getElementById('copyUrlBtn').addEventListener('click', () => {
     navigator.clipboard.writeText(document.getElementById('apiUrl').value);
     document.getElementById('copyUrlBtn').textContent = 'Copie!';
@@ -756,15 +857,17 @@ async function loadApiInfo() {
 
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
+  const username = document.getElementById('loginUsername').value;
   const pw = document.getElementById('loginPassword').value;
   const err = document.getElementById('loginError');
   err.textContent = '';
-  const ok = await login(pw);
+  const ok = await login(username, pw);
   if (ok) {
+    document.getElementById('loginUsername').value = '';
     document.getElementById('loginPassword').value = '';
     init();
   } else {
-    err.textContent = 'Mot de passe incorrect';
+    err.textContent = 'Identifiants incorrects';
   }
 });
 

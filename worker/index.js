@@ -3,6 +3,16 @@ const ALLOWED_ORIGINS = [
   'http://localhost:8765',
 ];
 
+// --- User configuration ---
+const USERS = {
+  dany: { type: 'cellar', displayName: 'Dany', envPassword: 'AUTH_PASSWORD' },
+  saq: { type: 'saq', displayName: 'Invité SAQ', envPassword: 'AUTH_PASSWORD_SAQ' },
+};
+
+function userKey(username, key) {
+  return `user:${username}:${key}`;
+}
+
 function corsHeaders(request) {
   const origin = request.headers.get('Origin') || '';
   const allowed = ALLOWED_ORIGINS.find((o) => origin.startsWith(o)) || ALLOWED_ORIGINS[0];
@@ -28,22 +38,29 @@ async function hmacSign(data, secret) {
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function createSession(env) {
+async function createSession(username, env) {
   const ts = Math.floor(Date.now() / 1000);
-  const sig = await hmacSign(`session:${ts}`, env.AUTH_PASSWORD);
-  return `${ts}.${sig}`;
+  const sig = await hmacSign(`session:${username}:${ts}`, env.SESSION_SECRET);
+  return `${username}.${ts}.${sig}`;
 }
 
 async function verifySession(token, env) {
-  if (!token) return false;
-  const [tsStr, sig] = token.split('.');
-  if (!tsStr || !sig) return false;
+  if (!token) return null;
+  const parts = token.split('.');
+  if (parts.length < 3) return null;
+  const username = parts.slice(0, -2).join('.');
+  const tsStr = parts[parts.length - 2];
+  const sig = parts[parts.length - 1];
+  if (!username || !tsStr || !sig) return null;
   const ts = parseInt(tsStr, 10);
-  if (isNaN(ts)) return false;
+  if (isNaN(ts)) return null;
   const age = Math.floor(Date.now() / 1000) - ts;
-  if (age > 30 * 86400) return false; // 30 days max
-  const expected = await hmacSign(`session:${ts}`, env.AUTH_PASSWORD);
-  return sig === expected;
+  if (age > 30 * 86400) return null; // 30 days max
+  const expected = await hmacSign(`session:${username}:${ts}`, env.SESSION_SECRET);
+  if (sig !== expected) return null;
+  const user = USERS[username];
+  if (!user) return null;
+  return { username, type: user.type, displayName: user.displayName };
 }
 
 function getCookie(request, name) {
@@ -52,25 +69,41 @@ function getCookie(request, name) {
   return match ? match[1] : null;
 }
 
-async function getApiKey(env) {
-  const kvKey = await env.API_KEYS.get('current');
+async function getApiKey(username, env) {
+  const kvKey = await env.API_KEYS.get(userKey(username, 'api_key'));
   return kvKey || env.API_KEY;
 }
 
 async function verifyApiKey(key, env) {
-  if (!key) return false;
-  const current = await getApiKey(env);
-  return current && key === current;
+  if (!key) return null;
+  // Check all cellar users' API keys
+  for (const [username, config] of Object.entries(USERS)) {
+    if (config.type !== 'cellar') continue;
+    const current = await env.API_KEYS.get(userKey(username, 'api_key'));
+    if (current && key === current) return { username, type: config.type, displayName: config.displayName };
+  }
+  // Fallback to legacy env API_KEY
+  if (env.API_KEY && key === env.API_KEY) {
+    return { username: 'dany', type: 'cellar', displayName: 'Dany' };
+  }
+  return null;
 }
 
 async function isAuthorized(request, env) {
+  // API key auth
   const apiKey = request.headers.get('X-API-Key');
-  if (apiKey && await verifyApiKey(apiKey, env)) return true;
+  if (apiKey) {
+    const user = await verifyApiKey(apiKey, env);
+    if (user) return user;
+  }
+  // Bearer token auth
   const auth = request.headers.get('Authorization') || '';
   if (auth.startsWith('Bearer ')) {
     const token = auth.slice(7);
-    if (await verifySession(token, env)) return true;
+    const user = await verifySession(token, env);
+    if (user) return user;
   }
+  // Cookie auth (legacy)
   const sessionToken = getCookie(request, 'session');
   return verifySession(sessionToken, env);
 }
@@ -83,12 +116,26 @@ async function handleLogin(request, env) {
     return jsonResponse({ error: 'Invalid JSON' }, 400, request);
   }
 
-  if (!body.password || body.password !== env.AUTH_PASSWORD) {
-    return jsonResponse({ error: 'Mot de passe incorrect' }, 401, request);
+  const username = (body.username || '').toLowerCase().trim();
+  const user = USERS[username];
+
+  if (!user) {
+    return jsonResponse({ error: 'Identifiants incorrects' }, 401, request);
   }
 
-  const session = await createSession(env);
-  return jsonResponse({ ok: true, token: session }, 200, request);
+  const expectedPassword = env[user.envPassword];
+  if (!expectedPassword || !body.password || body.password !== expectedPassword) {
+    return jsonResponse({ error: 'Identifiants incorrects' }, 401, request);
+  }
+
+  const session = await createSession(username, env);
+  return jsonResponse({
+    ok: true,
+    token: session,
+    username,
+    type: user.type,
+    displayName: user.displayName,
+  }, 200, request);
 }
 
 function handleLogout(request) {
@@ -150,6 +197,102 @@ async function handleWines(request, env) {
   });
 }
 
+// --- SAQ Adobe LiveSearch Integration ---
+
+const SAQ_GQL_ENDPOINT = 'https://catalog-service.adobe.io/graphql';
+const SAQ_GQL_HEADERS = {
+  'Content-Type': 'application/json',
+  'Magento-Environment-Id': '2ce24571-9db9-4786-84a9-5f129257ccbb',
+  'Magento-Store-View-Code': 'fr',
+  'Magento-Website-Code': 'main_website',
+  'Magento-Store-Code': 'main_website_store',
+  'Magento-Customer-Group': 'b6589fc6ab0dc82cf12099d1c2d40ab994e8410c',
+  'x-api-key': 'search_gql',
+};
+
+async function searchSAQ(params) {
+  // Build search phrase enriched with filter hints
+  const phraseParts = [params.query || ''];
+  if (params.color) phraseParts.push(params.color);
+  if (params.grape) phraseParts.push(params.grape);
+  if (params.country) phraseParts.push(params.country);
+  const phrase = phraseParts.filter(Boolean).join(' ');
+
+  const query = `{
+    productSearch(phrase: "${phrase.replace(/"/g, '\\"')}", page_size: 15) {
+      total_count
+      items {
+        productView {
+          name
+          sku
+          urlKey
+          attributes { name value }
+        }
+      }
+    }
+  }`;
+
+  const res = await fetch(SAQ_GQL_ENDPOINT, {
+    method: 'POST',
+    headers: SAQ_GQL_HEADERS,
+    body: JSON.stringify({ query }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error('SAQ API error ' + res.status + ': ' + errText);
+  }
+
+  const data = await res.json();
+  if (data.errors) {
+    throw new Error('SAQ GraphQL error: ' + data.errors[0].message);
+  }
+
+  const items = data.data?.productSearch?.items || [];
+
+  // Filter and transform results
+  return items
+    .map((item) => {
+      const pv = item.productView;
+      const attrs = {};
+      for (const a of pv.attributes || []) {
+        if (a.value && a.value !== '') attrs[a.name] = a.value;
+      }
+      return {
+        name: pv.name || '',
+        sku: pv.sku || '',
+        url: 'https://www.saq.com/fr/' + (pv.urlKey || pv.sku),
+        color: attrs.couleur || '',
+        grape: attrs.cepage || '',
+        country: attrs.pays || '',
+        region: attrs.region || '',
+        vintage: attrs.millesime || '',
+        format: attrs.format || '',
+        alcohol: attrs.taux_alcool || '',
+        price: attrs.prix_saq || attrs.regular_price || '',
+        availability: Array.isArray(attrs.availability_front) ? attrs.availability_front[0] : (attrs.availability_front || ''),
+      };
+    })
+    .filter((w) => w.color && !w.url.includes('blog') && !w.url.includes('recette'));
+}
+
+const SAQ_TOOLS = [{
+  name: 'search_saq',
+  description: 'Rechercher des vins dans le catalogue de la SAQ. Utilise cet outil pour trouver des vins disponibles a la SAQ. La recherche est textuelle, combine les mots-cles pour de meilleurs resultats.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Texte de recherche principal (ex: "bordeaux rouge", "chablis", "pinot noir italie")' },
+      color: { type: 'string', description: 'Couleur du vin (rouge, blanc, rose) - sera ajoute a la recherche' },
+      grape: { type: 'string', description: 'Cepage (ex: Merlot, Chardonnay, Pinot Noir)' },
+      country: { type: 'string', description: 'Pays (ex: France, Italie, Espagne)' },
+    },
+    required: ['query'],
+  },
+}];
+
+// --- Sommelier Prompts ---
+
 const SOMMELIER_PROMPT = `Tu es un sommelier expert et chaleureux, le sommelier personnel de l'utilisateur. Tu connais ses gouts et sa cave intimement.
 
 Quand on te decrit un plat ou un repas, recommande 1 a 3 vins de cette cave qui s'y marieraient bien. Pour chaque vin recommande:
@@ -172,6 +315,32 @@ Pour supprimer une preference existante:
 <!--PREFS_UPDATE:{"remove":["texte exact de la preference a retirer"]}-->
 Si l'utilisateur demande de voir ses preferences ou son profil, liste-les.
 N'ajoute le bloc PREFS_UPDATE que quand une NOUVELLE preference est clairement exprimee. Ne le mets pas si c'est juste une question ou un commentaire ponctuel.
+`;
+
+const SAQ_SOMMELIER_PROMPT = `Tu es un sommelier expert et chaleureux. L'utilisateur n'a pas de cave personnelle, mais tu l'aides a choisir des vins disponibles a la SAQ (Societe des alcools du Quebec).
+
+Quand on te decrit un plat, une occasion ou un style de vin recherche:
+1. Reflechis au type de vin ideal (couleur, cepage, region, gamme de prix)
+2. Utilise l'outil search_saq pour chercher des vins correspondants a la SAQ
+3. Recommande 1 a 3 vins parmi les resultats avec:
+   - Le nom exact du vin et son prix
+   - Une breve explication de pourquoi ce vin convient
+   - Le lien SAQ pour l'acheter
+
+Regles:
+- Ne recommande QUE des vins trouves via search_saq (disponibles a la SAQ)
+- Tiens compte des PREFERENCES PERSONNELLES ci-dessous
+- Reponds en francais, de facon concise et chaleureuse
+- Tu peux faire plusieurs recherches si la premiere ne donne pas de bons resultats
+- Si on te demande un vin specifique, cherche-le par nom
+- Tu peux aussi repondre a des questions generales sur le vin
+
+DETECTION DE PREFERENCES:
+Quand l'utilisateur exprime une preference (ex: "j'adore les vins corses", "je n'aime pas les blancs boises", "retiens que..."), tu dois l'extraire et l'ajouter a la fin de ta reponse dans un bloc JSON invisible:
+<!--PREFS_UPDATE:{"add":["preference en texte court"]}-->
+Pour supprimer une preference existante:
+<!--PREFS_UPDATE:{"remove":["texte exact de la preference a retirer"]}-->
+N'ajoute le bloc PREFS_UPDATE que quand une NOUVELLE preference est clairement exprimee.
 `;
 
 const GUIDE_PROMPT = `Tu es un sommelier expert qui aide l'utilisateur a definir son profil de gouts. Tu dois mener une conversation guidee et chaleureuse pour decouvrir ses preferences.
@@ -203,8 +372,9 @@ Regles:
 - Enregistre chaque preference detectee avec PREFS_UPDATE
 `;
 
+// --- Chat Handler ---
 
-async function handleChat(request, env) {
+async function handleChat(request, env, user) {
   let body;
   try {
     body = await request.json();
@@ -221,28 +391,15 @@ async function handleChat(request, env) {
   }
 
   const isGuideMode = body.message === '__GUIDE_PROFIL__';
+  const isCellar = user.type === 'cellar';
 
-  // Load preferences, cepages and wines in parallel
-  const [wines, prefsRaw, cepagesRaw] = await Promise.all([
-    fetchWines(env),
-    env.API_KEYS.get('taste_profile'),
-    env.API_KEYS.get('taste_cepages'),
+  // Load preferences and cepages for this user
+  const [prefsRaw, cepagesRaw] = await Promise.all([
+    env.API_KEYS.get(userKey(user.username, 'taste_profile')),
+    env.API_KEYS.get(userKey(user.username, 'taste_cepages')),
   ]);
   const prefs = prefsRaw ? JSON.parse(prefsRaw) : [];
   const cepages = cepagesRaw ? JSON.parse(cepagesRaw) : [];
-
-  const inventory = wines.map((w) => {
-    const parts = [w.name];
-    if (w.vintage) parts.push(w.vintage);
-    parts.push(w.color);
-    if (w.country) parts.push(w.country);
-    if (w.regions) parts.push(w.regions);
-    parts.push(w.bottles + ' bout.');
-    if (w.maturityStart || w.maturityPeak || w.maturityEnd) {
-      parts.push('maturite: ' + [w.maturityStart, w.maturityPeak, w.maturityEnd].filter(Boolean).join('-'));
-    }
-    return parts.join(' | ');
-  }).join('\n');
 
   let profileSection = '';
   if (cepages.length > 0) {
@@ -252,8 +409,32 @@ async function handleChat(request, env) {
     ? '\nPREFERENCES PERSONNELLES ACTUELLES:\n' + prefs.map((p) => '- ' + p).join('\n') + '\n'
     : '\nPREFERENCES PERSONNELLES: (aucune pour le moment)\n';
 
-  const basePrompt = isGuideMode ? GUIDE_PROMPT : SOMMELIER_PROMPT;
-  const systemPrompt = basePrompt + profileSection + '\nINVENTAIRE DE LA CAVE:\n' + inventory;
+  let systemPrompt;
+  let tools = undefined;
+
+  if (isGuideMode) {
+    systemPrompt = GUIDE_PROMPT + profileSection;
+  } else if (isCellar) {
+    // Cellar user: fetch wines and inject inventory
+    const wines = await fetchWines(env);
+    const inventory = wines.map((w) => {
+      const parts = [w.name];
+      if (w.vintage) parts.push(w.vintage);
+      parts.push(w.color);
+      if (w.country) parts.push(w.country);
+      if (w.regions) parts.push(w.regions);
+      parts.push(w.bottles + ' bout.');
+      if (w.maturityStart || w.maturityPeak || w.maturityEnd) {
+        parts.push('maturite: ' + [w.maturityStart, w.maturityPeak, w.maturityEnd].filter(Boolean).join('-'));
+      }
+      return parts.join(' | ');
+    }).join('\n');
+    systemPrompt = SOMMELIER_PROMPT + profileSection + '\nINVENTAIRE DE LA CAVE:\n' + inventory;
+  } else {
+    // SAQ user: use tool-based approach
+    systemPrompt = SAQ_SOMMELIER_PROMPT + profileSection;
+    tools = SAQ_TOOLS;
+  }
 
   const messages = [];
   if (body.history && Array.isArray(body.history)) {
@@ -268,28 +449,69 @@ async function handleChat(request, env) {
     : body.message;
   messages.push({ role: 'user', content: userMessage });
 
-  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': env.ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
+  // Call Claude (with tool-use loop for SAQ users)
+  let reply = '';
+  const maxLoops = 3;
+
+  for (let loop = 0; loop <= maxLoops; loop++) {
+    const claudeBody = {
       model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       system: systemPrompt,
       messages,
-    }),
-  });
+    };
+    if (tools && !isGuideMode) {
+      claudeBody.tools = tools;
+    }
 
-  if (!claudeRes.ok) {
-    const errText = await claudeRes.text();
-    return jsonResponse({ error: 'Erreur IA: ' + claudeRes.status, detail: errText }, 502, request);
+    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify(claudeBody),
+    });
+
+    if (!claudeRes.ok) {
+      const errText = await claudeRes.text();
+      return jsonResponse({ error: 'Erreur IA: ' + claudeRes.status, detail: errText }, 502, request);
+    }
+
+    const claudeData = await claudeRes.json();
+
+    // Check if Claude wants to use a tool
+    if (claudeData.stop_reason === 'tool_use') {
+      const toolUse = claudeData.content.find((c) => c.type === 'tool_use');
+      if (toolUse && toolUse.name === 'search_saq') {
+        // Execute SAQ search
+        let saqResults;
+        try {
+          saqResults = await searchSAQ(toolUse.input);
+        } catch (err) {
+          saqResults = [{ error: err.message }];
+        }
+
+        // Add assistant response and tool result to messages
+        messages.push({ role: 'assistant', content: claudeData.content });
+        messages.push({
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: JSON.stringify(saqResults),
+          }],
+        });
+        continue; // Loop back to get Claude's final response
+      }
+    }
+
+    // Extract text reply
+    const textBlocks = claudeData.content.filter((c) => c.type === 'text');
+    reply = textBlocks.map((c) => c.text).join('');
+    break;
   }
-
-  const claudeData = await claudeRes.json();
-  let reply = claudeData.content && claudeData.content[0] ? claudeData.content[0].text : '';
 
   // Extract and apply preference updates
   const prefsMatch = reply.match(/<!--PREFS_UPDATE:(.*?)-->/);
@@ -305,13 +527,15 @@ async function handleChat(request, env) {
       if (update.remove) {
         updated = updated.filter((p) => !update.remove.includes(p));
       }
-      await env.API_KEYS.put('taste_profile', JSON.stringify(updated));
+      await env.API_KEYS.put(userKey(user.username, 'taste_profile'), JSON.stringify(updated));
     } catch {}
     reply = reply.replace(/<!--PREFS_UPDATE:.*?-->/g, '').trim();
   }
 
   return jsonResponse({ reply, preferences: prefs.length + (prefsMatch ? 1 : 0) }, 200, request);
 }
+
+// --- Main Router ---
 
 export default {
   async fetch(request, env) {
@@ -332,21 +556,30 @@ export default {
       return handleLogout(request);
     }
 
-    // Check session status
+    // Check session status — returns user info
     if (request.method === 'GET' && path === '/check') {
-      const authed = await isAuthorized(request, env);
-      return jsonResponse({ authenticated: authed }, 200, request);
+      const user = await isAuthorized(request, env);
+      if (!user) {
+        return jsonResponse({ authenticated: false }, 200, request);
+      }
+      return jsonResponse({
+        authenticated: true,
+        username: user.username,
+        type: user.type,
+        displayName: user.displayName,
+      }, 200, request);
     }
 
-    // Get/update taste preferences
+    // Get/update taste preferences (user-scoped)
     if (path === '/preferences') {
-      if (!(await isAuthorized(request, env))) {
+      const user = await isAuthorized(request, env);
+      if (!user) {
         return jsonResponse({ error: 'Non autorisé' }, 401, request);
       }
       if (request.method === 'GET') {
         const [rawPrefs, rawCepages] = await Promise.all([
-          env.API_KEYS.get('taste_profile'),
-          env.API_KEYS.get('taste_cepages'),
+          env.API_KEYS.get(userKey(user.username, 'taste_profile')),
+          env.API_KEYS.get(userKey(user.username, 'taste_cepages')),
         ]);
         return jsonResponse({
           preferences: rawPrefs ? JSON.parse(rawPrefs) : [],
@@ -357,10 +590,10 @@ export default {
         const body = await request.json();
         const writes = [];
         if (body.preferences && Array.isArray(body.preferences)) {
-          writes.push(env.API_KEYS.put('taste_profile', JSON.stringify(body.preferences)));
+          writes.push(env.API_KEYS.put(userKey(user.username, 'taste_profile'), JSON.stringify(body.preferences)));
         }
         if (body.cepages && Array.isArray(body.cepages)) {
-          writes.push(env.API_KEYS.put('taste_cepages', JSON.stringify(body.cepages)));
+          writes.push(env.API_KEYS.put(userKey(user.username, 'taste_cepages'), JSON.stringify(body.cepages)));
         }
         await Promise.all(writes);
         return jsonResponse({ ok: true }, 200, request);
@@ -369,20 +602,22 @@ export default {
 
     // Chat with sommelier AI (requires session auth)
     if (request.method === 'POST' && path === '/chat') {
-      if (!(await isAuthorized(request, env))) {
+      const user = await isAuthorized(request, env);
+      if (!user) {
         return jsonResponse({ error: 'Non autorisé' }, 401, request);
       }
       try {
-        return await handleChat(request, env);
+        return await handleChat(request, env, user);
       } catch (err) {
         return jsonResponse({ error: err.message }, 500, request);
       }
     }
 
-    // Public route with API key in query param
+    // Public route with API key in query param (cellar users only)
     if (request.method === 'GET' && path === '/public/cellar') {
       const key = url.searchParams.get('key');
-      if (!key || !(await verifyApiKey(key, env))) {
+      const user = await verifyApiKey(key, env);
+      if (!user) {
         return jsonResponse({ error: 'Non autorisé' }, 401, request);
       }
       try {
@@ -392,37 +627,49 @@ export default {
       }
     }
 
-    // API info (requires session auth)
+    // API info (requires session auth, cellar users only)
     if (request.method === 'GET' && path === '/api-info') {
-      if (!(await isAuthorized(request, env))) {
+      const user = await isAuthorized(request, env);
+      if (!user) {
         return jsonResponse({ error: 'Non autorisé' }, 401, request);
       }
-      const apiKey = await getApiKey(env);
+      if (user.type !== 'cellar') {
+        return jsonResponse({ error: 'Non disponible pour ce type de compte' }, 403, request);
+      }
+      const apiKey = await getApiKey(user.username, env);
       return jsonResponse({
         key: apiKey,
         url: url.origin + '/public/cellar?key=' + apiKey,
       }, 200, request);
     }
 
-    // Rotate API key (requires session auth)
+    // Rotate API key (requires session auth, cellar users only)
     if (request.method === 'POST' && path === '/rotate-key') {
-      if (!(await isAuthorized(request, env))) {
+      const user = await isAuthorized(request, env);
+      if (!user) {
         return jsonResponse({ error: 'Non autorisé' }, 401, request);
+      }
+      if (user.type !== 'cellar') {
+        return jsonResponse({ error: 'Non disponible pour ce type de compte' }, 403, request);
       }
       const bytes = new Uint8Array(24);
       crypto.getRandomValues(bytes);
       const newKey = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
-      await env.API_KEYS.put('current', newKey);
+      await env.API_KEYS.put(userKey(user.username, 'api_key'), newKey);
       return jsonResponse({
         key: newKey,
         url: url.origin + '/public/cellar?key=' + newKey,
       }, 200, request);
     }
 
-    // All other routes require auth
+    // Wine list (cellar users only)
     if (request.method === 'GET' && (path === '/' || path === '/wines')) {
-      if (!(await isAuthorized(request, env))) {
+      const user = await isAuthorized(request, env);
+      if (!user) {
         return jsonResponse({ error: 'Non autorisé' }, 401, request);
+      }
+      if (user.type !== 'cellar') {
+        return jsonResponse([], 200, request); // SAQ users get empty inventory
       }
       try {
         return await handleWines(request, env);
