@@ -2,6 +2,10 @@ name = "wine-api-proxy"
 main = "index.js"
 compatibility_date = "2024-01-01"
 
+[vars]
+SAQ_ENVIRONMENT_ID = "2ce24571-9db9-4786-84a9-5f129257ccbb"
+SAQ_CUSTOMER_GROUP = "b6589fc6ab0dc82cf12099d1c2d40ab994e8410c"
+
 [[kv_namespaces]]
 binding = "API_KEYS"
 id = "e02569e9598a424392ab17fd7bb84ec8"

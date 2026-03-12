@@ -353,11 +353,15 @@ async function login(username, password) {
 }
 
 async function logout() {
+  const token = localStorage.getItem('session');
   localStorage.removeItem('session');
   localStorage.removeItem('userType');
   localStorage.removeItem('displayName');
   userType = null;
   displayName = null;
+  if (token) {
+    fetch(API_URL + '/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } }).catch(() => {});
+  }
   showLogin();
 }
 
@@ -793,7 +797,8 @@ function addChatBubble(text, type) {
 }
 
 function formatChatText(text) {
-  return text
+  const escaped = escapeHtml(text);
+  return escaped
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/\n/g, '<br>');

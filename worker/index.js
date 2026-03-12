@@ -13,23 +13,64 @@ function userKey(username, key) {
   return `user:${username}:${key}`;
 }
 
+// --- Security helpers ---
+
+async function timingSafeEqual(a, b) {
+  const encoder = new TextEncoder();
+  const bufA = encoder.encode(a);
+  const bufB = encoder.encode(b);
+  if (bufA.byteLength !== bufB.byteLength) {
+    // Burn constant time to prevent length-based timing leaks
+    crypto.subtle.timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return crypto.subtle.timingSafeEqual(bufA, bufB);
+}
+
+async function checkRateLimit(env, key, maxAttempts, windowSeconds) {
+  const now = Math.floor(Date.now() / 1000);
+  const window = Math.floor(now / windowSeconds);
+  const kvKey = `ratelimit:${key}:${window}`;
+  const current = parseInt(await env.API_KEYS.get(kvKey)) || 0;
+  if (current >= maxAttempts) return false;
+  await env.API_KEYS.put(kvKey, String(current + 1), { expirationTtl: windowSeconds * 2 });
+  return true;
+}
+
+function verifyCsrf(request) {
+  const origin = request.headers.get('Origin');
+  if (!origin) return true; // Non-browser clients (no Origin header)
+  return ALLOWED_ORIGINS.includes(origin);
+}
+
+// --- CORS & Response helpers ---
+
 function corsHeaders(request) {
   const origin = request.headers.get('Origin') || '';
-  const allowed = ALLOWED_ORIGINS.find((o) => origin.startsWith(o)) || ALLOWED_ORIGINS[0];
-  return {
-    'Access-Control-Allow-Origin': allowed,
+  const headers = {
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, Authorization',
     'Access-Control-Max-Age': '86400',
   };
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin;
+  }
+  return headers;
 }
+
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+};
 
 function jsonResponse(data, status, request, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...corsHeaders(request), 'Content-Type': 'application/json', ...extraHeaders },
+    headers: { ...corsHeaders(request), ...SECURITY_HEADERS, 'Content-Type': 'application/json', ...extraHeaders },
   });
 }
+
+// --- Auth helpers ---
 
 async function hmacSign(data, secret) {
   const encoder = new TextEncoder();
@@ -55,9 +96,12 @@ async function verifySession(token, env) {
   const ts = parseInt(tsStr, 10);
   if (isNaN(ts)) return null;
   const age = Math.floor(Date.now() / 1000) - ts;
-  if (age > 30 * 86400) return null; // 30 days max
+  if (age > 7 * 86400) return null; // 7 days max
   const expected = await hmacSign(`session:${username}:${ts}`, env.SESSION_SECRET);
-  if (sig !== expected) return null;
+  if (!(await timingSafeEqual(sig, expected))) return null;
+  // Check revocation blacklist
+  const revoked = await env.API_KEYS.get(`revoked:${sig}`);
+  if (revoked) return null;
   const user = USERS[username];
   if (!user) return null;
   return { username, type: user.type, displayName: user.displayName };
@@ -80,10 +124,10 @@ async function verifyApiKey(key, env) {
   for (const [username, config] of Object.entries(USERS)) {
     if (config.type !== 'cellar') continue;
     const current = await env.API_KEYS.get(userKey(username, 'api_key'));
-    if (current && key === current) return { username, type: config.type, displayName: config.displayName };
+    if (current && await timingSafeEqual(key, current)) return { username, type: config.type, displayName: config.displayName };
   }
   // Fallback to legacy env API_KEY
-  if (env.API_KEY && key === env.API_KEY) {
+  if (env.API_KEY && await timingSafeEqual(key, env.API_KEY)) {
     return { username: 'dany', type: 'cellar', displayName: 'Dany' };
   }
   return null;
@@ -117,6 +161,9 @@ async function handleLogin(request, env) {
   }
 
   const username = (body.username || '').toLowerCase().trim();
+  if (!username || username.length > 50 || !/^[a-z0-9]+$/.test(username)) {
+    return jsonResponse({ error: 'Identifiants incorrects' }, 401, request);
+  }
   const user = USERS[username];
 
   if (!user) {
@@ -124,7 +171,7 @@ async function handleLogin(request, env) {
   }
 
   const expectedPassword = env[user.envPassword];
-  if (!expectedPassword || !body.password || body.password !== expectedPassword) {
+  if (!expectedPassword || !body.password || !(await timingSafeEqual(String(body.password), expectedPassword))) {
     return jsonResponse({ error: 'Identifiants incorrects' }, 401, request);
   }
 
@@ -138,15 +185,34 @@ async function handleLogin(request, env) {
   }, 200, request);
 }
 
-function handleLogout(request) {
+async function handleLogout(request, env) {
+  // Revoke bearer token if present
+  const auth = request.headers.get('Authorization') || '';
+  if (auth.startsWith('Bearer ')) {
+    const token = auth.slice(7);
+    const parts = token.split('.');
+    if (parts.length >= 3) {
+      const sig = parts[parts.length - 1];
+      await env.API_KEYS.put(`revoked:${sig}`, '1', { expirationTtl: 7 * 86400 });
+    }
+  }
+  // Revoke cookie token if present
+  const cookieToken = getCookie(request, 'session');
+  if (cookieToken) {
+    const parts = cookieToken.split('.');
+    if (parts.length >= 3) {
+      const sig = parts[parts.length - 1];
+      await env.API_KEYS.put(`revoked:${sig}`, '1', { expirationTtl: 7 * 86400 });
+    }
+  }
   return jsonResponse({ ok: true }, 200, request, {
-    'Set-Cookie': 'session=; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=0',
+    'Set-Cookie': 'session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0',
   });
 }
 
 async function fetchWines(env) {
   const token = env.ALFRED_TOKEN;
-  if (!token) throw new Error('Token not configured');
+  if (!token) throw new Error('Erreur de recuperation des vins');
 
   const apiRes = await fetch('https://prod.cellars.io/search/catalog', {
     method: 'POST',
@@ -168,7 +234,10 @@ async function fetchWines(env) {
     }),
   });
 
-  if (!apiRes.ok) throw new Error('Alfred API error ' + apiRes.status);
+  if (!apiRes.ok) {
+    console.log('Alfred API error:', apiRes.status);
+    throw new Error('Erreur de recuperation des vins');
+  }
 
   const raw = await apiRes.json();
   const products = (raw.data && raw.data.data) || raw.data || [];
@@ -200,17 +269,20 @@ async function handleWines(request, env) {
 // --- SAQ Adobe LiveSearch Integration ---
 
 const SAQ_GQL_ENDPOINT = 'https://catalog-service.adobe.io/graphql';
-const SAQ_GQL_HEADERS = {
-  'Content-Type': 'application/json',
-  'Magento-Environment-Id': '2ce24571-9db9-4786-84a9-5f129257ccbb',
-  'Magento-Store-View-Code': 'fr',
-  'Magento-Website-Code': 'main_website',
-  'Magento-Store-Code': 'main_website_store',
-  'Magento-Customer-Group': 'b6589fc6ab0dc82cf12099d1c2d40ab994e8410c',
-  'x-api-key': 'search_gql',
-};
 
-async function searchSAQ(params) {
+function saqHeaders(env) {
+  return {
+    'Content-Type': 'application/json',
+    'Magento-Environment-Id': env.SAQ_ENVIRONMENT_ID || '2ce24571-9db9-4786-84a9-5f129257ccbb',
+    'Magento-Store-View-Code': 'fr',
+    'Magento-Website-Code': 'main_website',
+    'Magento-Store-Code': 'main_website_store',
+    'Magento-Customer-Group': env.SAQ_CUSTOMER_GROUP || 'b6589fc6ab0dc82cf12099d1c2d40ab994e8410c',
+    'x-api-key': 'search_gql',
+  };
+}
+
+async function searchSAQ(params, env) {
   // Build search phrase enriched with filter hints
   const phraseParts = [params.query || ''];
   if (params.color) phraseParts.push(params.color);
@@ -229,20 +301,27 @@ async function searchSAQ(params) {
   }`;
 
   const baseFilter = [{ attribute: 'visibility', in: ['Search', 'Catalog, Search'] }];
+  const headers = saqHeaders(env);
 
   // Two parallel requests: page 1 (name matches) + deep page (grape/attribute matches)
   const fetchPage = async (page, size) => {
     const res = await fetch(SAQ_GQL_ENDPOINT, {
       method: 'POST',
-      headers: SAQ_GQL_HEADERS,
+      headers,
       body: JSON.stringify({
         query: gqlQuery,
         variables: { phrase, pageSize: size, currentPage: page, filter: baseFilter },
       }),
     });
-    if (!res.ok) throw new Error('SAQ API error ' + res.status);
+    if (!res.ok) {
+      console.log('SAQ API error:', res.status);
+      throw new Error('Erreur de recherche SAQ');
+    }
     const data = await res.json();
-    if (data.errors) throw new Error('SAQ GraphQL error: ' + data.errors[0].message);
+    if (data.errors) {
+      console.log('SAQ GraphQL error:', data.errors[0]?.message);
+      throw new Error('Erreur de recherche SAQ');
+    }
     return data.data?.productSearch || { items: [], total_count: 0 };
   };
 
@@ -421,12 +500,12 @@ async function handleChat(request, env, user) {
     return jsonResponse({ error: 'Invalid JSON' }, 400, request);
   }
 
-  if (!body.message) {
-    return jsonResponse({ error: 'Message requis' }, 400, request);
+  if (!body.message || typeof body.message !== 'string' || body.message.length > 5000) {
+    return jsonResponse({ error: 'Message requis (max 5000 caracteres)' }, 400, request);
   }
 
   if (!env.ANTHROPIC_API_KEY) {
-    return jsonResponse({ error: 'Anthropic API key not configured' }, 500, request);
+    return jsonResponse({ error: 'Service IA non disponible' }, 500, request);
   }
 
   const isGuideMode = body.message === '__GUIDE_PROFIL__';
@@ -483,8 +562,9 @@ async function handleChat(request, env, user) {
 
   const messages = [];
   if (body.history && Array.isArray(body.history)) {
-    for (const msg of body.history) {
-      if (msg.role === 'user' || msg.role === 'assistant') {
+    const history = body.history.slice(0, 50); // max 50 messages
+    for (const msg of history) {
+      if ((msg.role === 'user' || msg.role === 'assistant') && typeof msg.content === 'string' && msg.content.length <= 5000) {
         messages.push({ role: msg.role, content: msg.content });
       }
     }
@@ -521,7 +601,8 @@ async function handleChat(request, env, user) {
 
     if (!claudeRes.ok) {
       const errText = await claudeRes.text();
-      return jsonResponse({ error: 'Erreur IA: ' + claudeRes.status, detail: errText }, 502, request);
+      console.log('Anthropic API error:', claudeRes.status, errText);
+      return jsonResponse({ error: 'Erreur du service IA. Reessayez.' }, 502, request);
     }
 
     const claudeData = await claudeRes.json();
@@ -535,9 +616,10 @@ async function handleChat(request, env, user) {
           if (toolUse.name === 'search_saq') {
             let saqResults;
             try {
-              saqResults = await searchSAQ(toolUse.input);
+              saqResults = await searchSAQ(toolUse.input, env);
             } catch (err) {
-              saqResults = [{ error: err.message }];
+              console.log('SAQ search error in chat:', err.message);
+              saqResults = [{ error: 'Erreur de recherche SAQ' }];
             }
             return {
               type: 'tool_result',
@@ -549,7 +631,7 @@ async function handleChat(request, env, user) {
           return {
             type: 'tool_result',
             tool_use_id: toolUse.id,
-            content: JSON.stringify({ error: 'Unknown tool: ' + toolUse.name }),
+            content: JSON.stringify({ error: 'Outil non disponible' }),
             is_error: true,
           };
         }));
@@ -597,17 +679,29 @@ export default {
     const path = url.pathname;
 
     if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: corsHeaders(request) });
+      return new Response(null, {
+        headers: { ...corsHeaders(request), ...SECURITY_HEADERS },
+      });
+    }
+
+    // CSRF protection for all POST requests
+    if (request.method === 'POST' && !verifyCsrf(request)) {
+      return jsonResponse({ error: 'Origine non autorisee' }, 403, request);
     }
 
     // Login route — no auth required
     if (request.method === 'POST' && path === '/login') {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const allowed = await checkRateLimit(env, `login:${ip}`, 5, 900); // 5 attempts per 15 min
+      if (!allowed) {
+        return jsonResponse({ error: 'Trop de tentatives. Reessayez dans quelques minutes.' }, 429, request);
+      }
       return handleLogin(request, env);
     }
 
-    // Logout route — no auth required
-    if (request.method === 'GET' && path === '/logout') {
-      return handleLogout(request);
+    // Logout route — accepts GET (legacy) and POST
+    if ((request.method === 'GET' || request.method === 'POST') && path === '/logout') {
+      return handleLogout(request, env);
     }
 
     // Check session status — returns user info
@@ -644,10 +738,12 @@ export default {
         const body = await request.json();
         const writes = [];
         if (body.preferences && Array.isArray(body.preferences)) {
-          writes.push(env.API_KEYS.put(userKey(user.username, 'taste_profile'), JSON.stringify(body.preferences)));
+          const validPrefs = body.preferences.slice(0, 50).filter(p => typeof p === 'string' && p.length <= 200);
+          writes.push(env.API_KEYS.put(userKey(user.username, 'taste_profile'), JSON.stringify(validPrefs)));
         }
         if (body.cepages && Array.isArray(body.cepages)) {
-          writes.push(env.API_KEYS.put(userKey(user.username, 'taste_cepages'), JSON.stringify(body.cepages)));
+          const validCepages = body.cepages.slice(0, 50).filter(c => typeof c === 'string' && c.length <= 200);
+          writes.push(env.API_KEYS.put(userKey(user.username, 'taste_cepages'), JSON.stringify(validCepages)));
         }
         await Promise.all(writes);
         return jsonResponse({ ok: true }, 200, request);
@@ -659,19 +755,20 @@ export default {
       const user = await isAuthorized(request, env);
       if (!user) return jsonResponse({ error: 'Non autorisé' }, 401, request);
       if (user.type !== 'saq') return jsonResponse({ error: 'SAQ seulement' }, 403, request);
-      const q = url.searchParams.get('q') || '';
+      const q = (url.searchParams.get('q') || '').slice(0, 200);
       if (!q.trim()) return jsonResponse({ results: [], total: 0 }, 200, request);
       try {
         const results = await searchSAQ({
           query: q,
-          color: url.searchParams.get('color') || '',
-          grape: url.searchParams.get('grape') || '',
-          country: url.searchParams.get('country') || '',
+          color: (url.searchParams.get('color') || '').slice(0, 200),
+          grape: (url.searchParams.get('grape') || '').slice(0, 200),
+          country: (url.searchParams.get('country') || '').slice(0, 200),
           page_size: 100,
-        });
+        }, env);
         return jsonResponse({ results, total: results.length }, 200, request);
       } catch (err) {
-        return jsonResponse({ error: err.message }, 500, request);
+        console.log('SAQ search error:', err.message);
+        return jsonResponse({ error: 'Erreur de recherche SAQ' }, 500, request);
       }
     }
 
@@ -687,6 +784,9 @@ export default {
       if (request.method === 'POST') {
         const body = await request.json();
         const storeId = (body.store || '').trim();
+        if (storeId.length > 100) {
+          return jsonResponse({ error: 'ID de succursale invalide' }, 400, request);
+        }
         await env.API_KEYS.put(userKey(user.username, 'saq_store'), storeId);
         return jsonResponse({ ok: true, store: storeId }, 200, request);
       }
@@ -698,10 +798,15 @@ export default {
       if (!user) {
         return jsonResponse({ error: 'Non autorisé' }, 401, request);
       }
+      const allowed = await checkRateLimit(env, `chat:${user.username}`, 30, 60); // 30 req/min
+      if (!allowed) {
+        return jsonResponse({ error: 'Trop de requetes. Reessayez dans une minute.' }, 429, request);
+      }
       try {
         return await handleChat(request, env, user);
       } catch (err) {
-        return jsonResponse({ error: err.message }, 500, request);
+        console.log('Chat error:', err.message);
+        return jsonResponse({ error: 'Erreur interne du serveur' }, 500, request);
       }
     }
 
@@ -715,7 +820,8 @@ export default {
       try {
         return await handleWines(request, env);
       } catch (err) {
-        return jsonResponse({ error: err.message }, 500, request);
+        console.log('Public cellar error:', err.message);
+        return jsonResponse({ error: 'Erreur interne du serveur' }, 500, request);
       }
     }
 
@@ -766,7 +872,8 @@ export default {
       try {
         return await handleWines(request, env);
       } catch (err) {
-        return jsonResponse({ error: err.message }, 500, request);
+        console.log('Wines error:', err.message);
+        return jsonResponse({ error: 'Erreur interne du serveur' }, 500, request);
       }
     }
 
