@@ -252,11 +252,11 @@ function exportCSV() {
     w.maturityEnd || '',
   ].join(','));
   const csv = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
-  downloadFile(csv, 'inventaire-vins.csv', 'text/csv;charset=utf-8');
+  downloadFile(csv, 'monsommelier.csv', 'text/csv;charset=utf-8');
 }
 
 function exportJSON() {
-  downloadFile(JSON.stringify(wines, null, 2), 'inventaire-vins.json', 'application/json');
+  downloadFile(JSON.stringify(wines, null, 2), 'monsommelier.json', 'application/json');
 }
 
 function escapeHtml(str) {
@@ -272,7 +272,7 @@ function setViewMode(mode) {
   renderWines();
 }
 
-const API_URL = 'https://wine-api-proxy.dany-b53.workers.dev';
+const API_URL = 'https://monsommelier.dany-b53.workers.dev';
 
 function showLogin() {
   document.getElementById('loginScreen').style.display = '';
@@ -291,7 +291,7 @@ function showApp() {
   const saqSection = document.getElementById('saqSection');
 
   // Title & badge
-  title.textContent = isSAQ ? 'Mon Sommelier SAQ' : 'Ma Cave à Vin';
+  title.textContent = isSAQ ? 'MonSommelier SAQ' : 'MonSommelier';
   if (displayName) {
     badge.textContent = displayName;
     badge.className = 'user-badge user-badge-' + userType;

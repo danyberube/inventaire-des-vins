@@ -1,4 +1,4 @@
-name = "wine-api-proxy"
+name = "monsommelier"
 main = "index.js"
 compatibility_date = "2024-01-01"
 

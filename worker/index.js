@@ -1,5 +1,5 @@
 const ALLOWED_ORIGINS = [
-  'https://inventaire-des-vins.pages.dev',
+  'https://monsommelier.pages.dev',
   'http://localhost:8765',
 ];
 
