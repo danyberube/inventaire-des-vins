@@ -2,8 +2,7 @@ name = "wine-api-proxy"
 main = "index.js"
 compatibility_date = "2024-01-01"
 
-[vars]
-APP_KEY = "***REMOVED***"
+# APP_KEY is stored as a Wrangler secret (npx wrangler secret put APP_KEY)
 
 [[kv_namespaces]]
 binding = "API_KEYS"

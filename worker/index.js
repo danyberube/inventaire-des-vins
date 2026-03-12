@@ -246,11 +246,13 @@ async function searchSAQ(params) {
     return data.data?.productSearch || { items: [], total_count: 0 };
   };
 
-  // Fetch page 1 (100 top results) + deep page for grape matches
-  const [page1, deepPage] = await Promise.all([
-    fetchPage(1, 100),
-    fetchPage(51, 100), // items 5001-5100 — past name matches, into grape matches
-  ]);
+  // Fetch page 1 first to get total_count, then deep page for grape matches
+  const page1 = await fetchPage(1, 100);
+  const totalCount = page1.total_count || 0;
+  const maxPage = Math.floor(totalCount / 100);
+  // Deep page: ~75% through results to find grape-only matches, skip if too few results
+  const deepPageNum = Math.min(Math.max(Math.floor(maxPage * 0.75), 2), maxPage);
+  const deepPage = maxPage >= 2 ? await fetchPage(deepPageNum, 100) : { items: [] };
 
   // Merge and deduplicate by SKU
   const seen = new Set();
